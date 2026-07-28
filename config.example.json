@@ -1,14 +1,21 @@
 {
   "league_id": 1083280,
-  "years": [2025],
+  "years": [2024, 2025],
   "espn_s2": "",
   "swid": "",
   "output": "espn_ff_1083280.xlsx",
   "sqlite": "espn_ff_1083280.db",
   "regular_season_weeks": {
+    "2024": 14,
     "2025": 14
   },
   "contests": {
+    "2024": [
+      { "name": "Mushroom Cup", "start_week": 1, "end_week": 3 },
+      { "name": "Flower Cup", "start_week": 4, "end_week": 7 },
+      { "name": "Star Cup", "start_week": 8, "end_week": 11 },
+      { "name": "Special Cup", "start_week": 12, "end_week": 15 }
+    ],
     "2025": [
       { "name": "Mushroom Cup", "start_week": 1, "end_week": 3 },
       { "name": "Flower Cup", "start_week": 4, "end_week": 7 },
