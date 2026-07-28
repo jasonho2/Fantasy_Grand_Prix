@@ -5,26 +5,26 @@ import { useSearchParams } from "next/navigation";
 import SeasonSelect from "../components/SeasonSelect";
 import { useJson } from "../../lib/useJson";
 
-// Cumulative W-L(-T) record for every manager as of the end of each week,
-// computed from the FULL season's matchups regardless of any manager
+// Cumulative W-L(-T) record for every team as of the end of each week,
+// computed from the FULL season's matchups regardless of any team
 // filter applied to the display -- a record has to account for every game
 // played, not just the ones currently shown.
 function computeRunningRecords(rows) {
-  const managers = new Set();
+  const teams = new Set();
   rows.forEach((r) => {
-    managers.add(r.home_manager);
-    if (r.away_manager) managers.add(r.away_manager);
+    teams.add(r.home_team);
+    if (r.away_team) teams.add(r.away_team);
   });
-  const running = new Map([...managers].map((m) => [m, { wins: 0, losses: 0, ties: 0 }]));
+  const running = new Map([...teams].map((t) => [t, { wins: 0, losses: 0, ties: 0 }]));
 
   const weeks = [...new Set(rows.map((r) => r.week))].sort((a, b) => a - b);
-  const snapshot = new Map(); // `${manager}|${week}` -> { wins, losses, ties }
+  const snapshot = new Map(); // `${team}|${week}` -> { wins, losses, ties }
 
   for (const week of weeks) {
     for (const row of rows.filter((r) => r.week === week)) {
-      if (row.is_bye || !row.away_manager) continue;
-      const home = running.get(row.home_manager);
-      const away = running.get(row.away_manager);
+      if (row.is_bye || !row.away_team) continue;
+      const home = running.get(row.home_team);
+      const away = running.get(row.away_team);
       if (row.winner === "TIE") {
         home.ties += 1;
         away.ties += 1;
@@ -36,8 +36,8 @@ function computeRunningRecords(rows) {
         home.losses += 1;
       }
     }
-    for (const m of managers) {
-      snapshot.set(`${m}|${week}`, { ...running.get(m) });
+    for (const t of teams) {
+      snapshot.set(`${t}|${week}`, { ...running.get(t) });
     }
   }
   return snapshot;
@@ -60,16 +60,16 @@ function groupByWeek(rows) {
 function headToHead(rows) {
   const pairs = new Map(); // key: sorted "A|B" -> { a, b, aWins, bWins, ties }
   for (const row of rows) {
-    if (row.is_bye || !row.away_manager) continue;
-    const [a, b] = [row.home_manager, row.away_manager].sort();
+    if (row.is_bye || !row.away_team) continue;
+    const [a, b] = [row.home_team, row.away_team].sort();
     const key = `${a}|${b}`;
     if (!pairs.has(key)) pairs.set(key, { a, b, aWins: 0, bWins: 0, ties: 0 });
     const entry = pairs.get(key);
     if (row.winner === "TIE") {
       entry.ties += 1;
     } else {
-      const winnerManager = row.winner === "HOME" ? row.home_manager : row.away_manager;
-      if (winnerManager === a) entry.aWins += 1;
+      const winnerTeam = row.winner === "HOME" ? row.home_team : row.away_team;
+      if (winnerTeam === a) entry.aWins += 1;
       else entry.bWins += 1;
     }
   }
@@ -87,21 +87,21 @@ function MatchupsInner() {
   const { data, loading, error } = useJson(activeSeason ? `/api/matchups?season=${activeSeason}` : null);
   const rows = data?.rows || [];
 
-  const [managerFilter, setManagerFilter] = useState("All");
+  const [teamFilter, setTeamFilter] = useState("All");
 
-  const managers = useMemo(() => {
+  const teams = useMemo(() => {
     const set = new Set();
     rows.forEach((r) => {
-      set.add(r.home_manager);
-      if (r.away_manager) set.add(r.away_manager);
+      set.add(r.home_team);
+      if (r.away_team) set.add(r.away_team);
     });
     return ["All", ...set].sort();
   }, [rows]);
 
   const filteredRows = useMemo(() => {
-    if (managerFilter === "All") return rows;
-    return rows.filter((r) => r.home_manager === managerFilter || r.away_manager === managerFilter);
-  }, [rows, managerFilter]);
+    if (teamFilter === "All") return rows;
+    return rows.filter((r) => r.home_team === teamFilter || r.away_team === teamFilter);
+  }, [rows, teamFilter]);
 
   const h2h = useMemo(() => headToHead(rows), [rows]);
   const weeks = useMemo(() => groupByWeek(filteredRows), [filteredRows]);
@@ -111,9 +111,9 @@ function MatchupsInner() {
     <>
       <div className="controls">
         <SeasonSelect seasons={seasons} season={activeSeason} />
-        <select value={managerFilter} onChange={(e) => setManagerFilter(e.target.value)}>
-          {managers.map((m) => (
-            <option key={m} value={m}>{m === "All" ? "All Managers" : m}</option>
+        <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}>
+          {teams.map((t) => (
+            <option key={t} value={t}>{t === "All" ? "All Teams" : t}</option>
           ))}
         </select>
       </div>
@@ -129,7 +129,7 @@ function MatchupsInner() {
               <div key={week} style={{ marginBottom: 24 }}>
                 <h3 style={{ fontSize: 14, color: "var(--text-dim)", margin: "0 0 8px" }}>Week {week}</h3>
                 <div className="table-scroll">
-                  <table>
+                  <table className="matchup-table">
                     <thead>
                       <tr>
                         <th>Home</th>
@@ -142,18 +142,19 @@ function MatchupsInner() {
                         const homeWon = !row.is_bye && row.winner === "HOME";
                         const awayWon = !row.is_bye && row.winner === "AWAY";
                         const isTie = !row.is_bye && row.winner === "TIE";
-                        const homeRec = formatRecord(records.get(`${row.home_manager}|${row.week}`));
-                        const awayRec = row.away_manager
-                          ? formatRecord(records.get(`${row.away_manager}|${row.week}`))
+                        const homeRec = formatRecord(records.get(`${row.home_team}|${row.week}`));
+                        const awayRec = row.away_team
+                          ? formatRecord(records.get(`${row.away_team}|${row.week}`))
                           : "";
                         const winnerStyle = { color: "var(--win)", fontWeight: 700 };
                         const tieStyle = { color: "var(--tie)" };
                         const cellStyle = (won) => (won ? winnerStyle : isTie ? tieStyle : undefined);
+                        const recordStyle = { color: "var(--text-dim)", fontWeight: 400, whiteSpace: "nowrap" };
                         return (
                           <tr key={i}>
                             <td style={cellStyle(homeWon)}>
-                              {row.home_manager}
-                              {homeRec && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({homeRec})</span>}
+                              {row.home_team}
+                              {homeRec && <span style={recordStyle}> ({homeRec})</span>}
                             </td>
                             <td>
                               {row.home_points?.toFixed?.(1) ?? row.home_points}
@@ -163,9 +164,9 @@ function MatchupsInner() {
                               {row.is_bye ? (
                                 <span className="badge bye">BYE</span>
                               ) : (
-                                row.away_manager
+                                row.away_team
                               )}
-                              {awayRec && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({awayRec})</span>}
+                              {awayRec && <span style={recordStyle}> ({awayRec})</span>}
                             </td>
                           </tr>
                         );
@@ -184,8 +185,8 @@ function MatchupsInner() {
               <table>
                 <thead>
                   <tr>
-                    <th>Manager</th>
-                    <th>Manager</th>
+                    <th>Team</th>
+                    <th>Team</th>
                     <th>Record</th>
                   </tr>
                 </thead>

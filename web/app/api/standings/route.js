@@ -55,12 +55,12 @@ export async function GET(request) {
   );
 
   const allWeekly = await query(
-    `SELECT wmp.week, m.manager_name AS manager, wmp.points
+    `SELECT wmp.week, m.manager_name AS manager, t.team_name AS team, wmp.points
      FROM weekly_manager_points wmp
      JOIN teams t ON t.team_id = wmp.team_id
      JOIN managers m ON m.manager_id = t.manager_id
      WHERE t.season = ?
-     ORDER BY wmp.week, manager`,
+     ORDER BY wmp.week, team`,
     [season]
   );
 

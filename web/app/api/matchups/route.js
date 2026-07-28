@@ -11,17 +11,15 @@ export async function GET(request) {
 
   const rows = await query(
     `SELECT mu.week,
-            home_m.manager_name AS home_manager,
-            away_m.manager_name AS away_manager,
+            ht.team_name AS home_team,
+            at.team_name AS away_team,
             mu.home_points,
             mu.away_points,
             mu.winner,
             mu.is_bye
      FROM matchups mu
      JOIN teams ht ON ht.team_id = mu.home_team_id
-     JOIN managers home_m ON home_m.manager_id = ht.manager_id
      LEFT JOIN teams at ON at.team_id = mu.away_team_id
-     LEFT JOIN managers away_m ON away_m.manager_id = at.manager_id
      WHERE mu.season = ?
      ORDER BY mu.week`,
     [season]

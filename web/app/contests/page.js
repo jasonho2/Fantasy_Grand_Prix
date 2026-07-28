@@ -94,7 +94,7 @@ function ContestPanel({ contest }) {
           <thead>
             <tr>
               <th className="sticky-col th-vertical">Rank</th>
-              <th className="sticky-col">Manager</th>
+              <th className="sticky-col">Team</th>
               {contest.weeks.map((wk) => (
                 <th key={wk}>Wk {wk}</th>
               ))}
@@ -104,11 +104,11 @@ function ContestPanel({ contest }) {
           </thead>
           <tbody>
             {sortedLeaderboard.map((row) => (
-              <tr key={row.manager} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
+              <tr key={row.team} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
                 <td className="sticky-col">{row.displayRank}</td>
                 <td className="sticky-col">
-                  <span className="truncate-cell" style={{ display: "inline-block", verticalAlign: "middle" }} title={row.manager}>
-                    {row.manager}
+                  <span className="truncate-cell" style={{ display: "inline-block", verticalAlign: "middle" }} title={row.team}>
+                    {row.team}
                   </span>
                   {row.displayRank === 1 && (
                     <span className="badge win" style={{ marginLeft: 6 }}>
@@ -151,7 +151,7 @@ function ContestsInner() {
         {data?.leagueName ? `${data.leagueName} Grand Prix` : "Grand Prix"}
       </h1>
       <p style={{ color: "var(--text-dim)", fontSize: 14, marginTop: 0, marginBottom: 20 }}>
-        Each week, every manager is ranked by that week&apos;s fantasy score and earns placement
+        Each week, every team is ranked by that week&apos;s fantasy score and earns placement
         points (1st: 12, 2nd: 10, 3rd: 9, down to last: 0). Placement points accumulate within a
         cup&apos;s weeks and determine the ranking below by default; use the sort toggle on each
         cup to rank by total fantasy points instead. Fantasy points are otherwise shown for

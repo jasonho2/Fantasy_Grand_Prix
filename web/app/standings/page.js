@@ -22,14 +22,14 @@ const COLORS = [
 ];
 
 function pivotWeekly(weekly) {
-  const managers = [...new Set(weekly.map((r) => r.manager))].sort();
+  const teams = [...new Set(weekly.map((r) => r.team))].sort();
   const byWeek = new Map();
   for (const row of weekly) {
     if (!byWeek.has(row.week)) byWeek.set(row.week, { week: row.week });
-    byWeek.get(row.week)[row.manager] = row.points;
+    byWeek.get(row.week)[row.team] = row.points;
   }
   const rows = [...byWeek.values()].sort((a, b) => a.week - b.week);
-  return { managers, rows };
+  return { teams, rows };
 }
 
 function StandingsInner() {
@@ -61,39 +61,39 @@ function StandingsInner() {
     return rows;
   }, [data, sortKey, sortDir]);
 
-  const { managers, rows: trendRows } = useMemo(
-    () => (data?.weekly ? pivotWeekly(data.weekly) : { managers: [], rows: [] }),
+  const { teams, rows: trendRows } = useMemo(
+    () => (data?.weekly ? pivotWeekly(data.weekly) : { teams: [], rows: [] }),
     [data]
   );
 
-  const { managers: playoffManagers, rows: playoffTrendRows } = useMemo(
-    () => (data?.playoffWeekly ? pivotWeekly(data.playoffWeekly) : { managers: [], rows: [] }),
+  const { teams: playoffTeams, rows: playoffTrendRows } = useMemo(
+    () => (data?.playoffWeekly ? pivotWeekly(data.playoffWeekly) : { teams: [], rows: [] }),
     [data]
   );
 
-  // Selecting a manager (via the standings table or either trend chart's
-  // legend/line) narrows both trend charts to just that manager. Selecting
+  // Selecting a team (via the standings table or either trend chart's
+  // legend/line) narrows both trend charts to just that team. Selecting
   // the same one again clears it back to showing everyone.
-  const [selectedManager, setSelectedManager] = useState(null);
-  function selectManager(mgr) {
-    setSelectedManager((prev) => (prev === mgr ? null : mgr));
+  const [selectedTeam, setSelectedTeam] = useState(null);
+  function selectTeam(team) {
+    setSelectedTeam((prev) => (prev === team ? null : team));
   }
 
-  const visibleManagers = selectedManager ? managers.filter((m) => m === selectedManager) : managers;
-  const visiblePlayoffManagers = selectedManager
-    ? playoffManagers.filter((m) => m === selectedManager)
-    : playoffManagers;
+  const visibleTeams = selectedTeam ? teams.filter((t) => t === selectedTeam) : teams;
+  const visiblePlayoffTeams = selectedTeam
+    ? playoffTeams.filter((t) => t === selectedTeam)
+    : playoffTeams;
 
   // Explicit legend payloads (rather than Recharts' default, which only
-  // lists currently-rendered Lines) so every manager stays clickable in the
+  // lists currently-rendered Lines) so every team stays clickable in the
   // legend even while the chart itself is narrowed to just one line.
-  const legendPayload = managers.map((mgr, i) => ({
-    value: mgr,
+  const legendPayload = teams.map((team, i) => ({
+    value: team,
     type: "line",
     color: COLORS[i % COLORS.length],
   }));
-  const playoffLegendPayload = playoffManagers.map((mgr, i) => ({
-    value: mgr,
+  const playoffLegendPayload = playoffTeams.map((team, i) => ({
+    value: team,
     type: "line",
     color: COLORS[i % COLORS.length],
   }));
@@ -111,10 +111,10 @@ function StandingsInner() {
     <>
       <div className="controls">
         <SeasonSelect seasons={seasons} season={activeSeason} />
-        {selectedManager && (
+        {selectedTeam && (
           <span style={{ fontSize: 14, color: "var(--text-dim)" }}>
-            Showing trend for <strong style={{ color: "var(--text)" }}>{selectedManager}</strong> --{" "}
-            <a href="#" onClick={(e) => { e.preventDefault(); setSelectedManager(null); }}>
+            Showing trend for <strong style={{ color: "var(--text)" }}>{selectedTeam}</strong> --{" "}
+            <a href="#" onClick={(e) => { e.preventDefault(); setSelectedTeam(null); }}>
               show all
             </a>
           </span>
@@ -135,7 +135,7 @@ function StandingsInner() {
               <table className="standings-table">
                 <thead>
                   <tr>
-                    <th className="sticky-col" onClick={() => toggleSort("manager")}>Manager</th>
+                    <th className="sticky-col" onClick={() => toggleSort("team")}>Team</th>
                     <th onClick={() => toggleSort("wins")}>W</th>
                     <th onClick={() => toggleSort("losses")}>L</th>
                     <th onClick={() => toggleSort("ties")}>T</th>
@@ -147,18 +147,18 @@ function StandingsInner() {
                 <tbody>
                   {sortedStandings.map((row) => (
                     <tr
-                      key={row.manager}
-                      onClick={() => selectManager(row.manager)}
+                      key={row.team}
+                      onClick={() => selectTeam(row.team)}
                       style={{
                         cursor: "pointer",
-                        background: selectedManager === row.manager ? "rgba(91,157,255,0.12)" : undefined,
+                        background: selectedTeam === row.team ? "rgba(91,157,255,0.12)" : undefined,
                       }}
                     >
                       <td
                         className="sticky-col"
-                        style={{ background: selectedManager === row.manager ? "#1f2a3c" : undefined }}
+                        style={{ background: selectedTeam === row.team ? "#1f2a3c" : undefined }}
                       >
-                        {row.manager}
+                        {row.team}
                       </td>
                       <td>{row.wins}</td>
                       <td>{row.losses}</td>
@@ -188,18 +188,18 @@ function StandingsInner() {
                   <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
                   <Legend
                     payload={legendPayload}
-                    onClick={(e) => selectManager(e.value)}
+                    onClick={(e) => selectTeam(e.value)}
                     wrapperStyle={{ cursor: "pointer", paddingTop: 20 }}
                   />
-                  {visibleManagers.map((mgr) => (
+                  {visibleTeams.map((team) => (
                     <Line
-                      key={mgr}
+                      key={team}
                       type="monotone"
-                      dataKey={mgr}
-                      stroke={COLORS[managers.indexOf(mgr) % COLORS.length]}
+                      dataKey={team}
+                      stroke={COLORS[teams.indexOf(team) % COLORS.length]}
                       dot={false}
                       strokeWidth={2}
-                      onClick={() => selectManager(mgr)}
+                      onClick={() => selectTeam(team)}
                       style={{ cursor: "pointer" }}
                     />
                   ))}
@@ -227,18 +227,18 @@ function StandingsInner() {
                     <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
                     <Legend
                       payload={playoffLegendPayload}
-                      onClick={(e) => selectManager(e.value)}
+                      onClick={(e) => selectTeam(e.value)}
                       wrapperStyle={{ cursor: "pointer", paddingTop: 20 }}
                     />
-                    {visiblePlayoffManagers.map((mgr) => (
+                    {visiblePlayoffTeams.map((team) => (
                       <Line
-                        key={mgr}
+                        key={team}
                         type="monotone"
-                        dataKey={mgr}
-                        stroke={COLORS[playoffManagers.indexOf(mgr) % COLORS.length]}
+                        dataKey={team}
+                        stroke={COLORS[playoffTeams.indexOf(team) % COLORS.length]}
                         dot={false}
                         strokeWidth={2}
-                        onClick={() => selectManager(mgr)}
+                        onClick={() => selectTeam(team)}
                         style={{ cursor: "pointer" }}
                       />
                     ))}

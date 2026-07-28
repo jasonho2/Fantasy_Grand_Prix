@@ -186,14 +186,24 @@ nav.topnav a.active {
 
   /* For narrow, short-value columns (Rank, Total, Position...) rotating
      the header lets the column be as wide as its data instead of as
-     wide as the label. */
+     wide as the label. text-orientation: upright keeps each character
+     right-side-up (stacked top-to-bottom) rather than rotating the
+     whole run of text sideways. */
   .th-vertical {
     writing-mode: vertical-rl;
-    transform: rotate(180deg);
+    text-orientation: upright;
     white-space: nowrap;
     text-align: left;
     vertical-align: bottom;
-    padding: 6px 3px;
+    letter-spacing: -1px;
+    padding: 6px 2px;
+  }
+
+  /* Schedule & Results: font small enough that "Score" never has to
+     wrap, even with the Home/Away columns carrying a team name plus a
+     running (W-L) record. */
+  .matchup-table {
+    font-size: 11px;
   }
 
   .controls {

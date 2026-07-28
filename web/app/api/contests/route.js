@@ -40,7 +40,7 @@ export async function GET(request) {
   );
 
   const weeklyRows = await query(
-    `SELECT wmp.week, m.manager_name AS manager, wmp.points
+    `SELECT wmp.week, m.manager_name AS manager, t.team_name AS team, wmp.points
      FROM weekly_manager_points wmp
      JOIN teams t ON t.team_id = wmp.team_id
      JOIN managers m ON m.manager_id = t.manager_id
@@ -48,6 +48,14 @@ export async function GET(request) {
      ORDER BY wmp.week, wmp.points DESC`,
     [season]
   );
+
+  // A manager maps to exactly one team for the season -- grab that mapping
+  // once so the leaderboard can be built/grouped by manager (a stable key)
+  // while still surfacing the team name for display.
+  const managerTeam = new Map();
+  for (const row of weeklyRows) {
+    if (!managerTeam.has(row.manager)) managerTeam.set(row.manager, row.team);
+  }
 
   // Rank each week's teams by that week's fantasy points, assign placement points.
   const byWeek = new Map();
@@ -87,7 +95,7 @@ export async function GET(request) {
 
     const leaderboard = [...totals.entries()]
       .map(([manager, t]) => ({
-        manager,
+        team: managerTeam.get(manager) ?? manager,
         contest_points: t.contest_points,
         fantasy_points: Number(t.fantasy_points.toFixed(2)),
         weekly_points: contestWeeks.map((wk) => t.byWeek[wk] ?? null),

@@ -32,21 +32,21 @@ const FALLBACK_COLOR = "#9aa1ad";
 const SLIDER_TRACK_WIDTH = 240;
 const SLIDER_THUMB_RADIUS = 7;
 
-function aggregateByManagerPosition(rows) {
-  const managers = [...new Set(rows.map((r) => r.manager))].sort();
+function aggregateByTeamPosition(rows) {
+  const teams = [...new Set(rows.map((r) => r.team))].sort();
   const positions = [...new Set(rows.map((r) => r.position))].sort();
-  const byManager = new Map(managers.map((m) => [m, { manager: m, total: 0 }]));
+  const byTeam = new Map(teams.map((t) => [t, { team: t, total: 0 }]));
   for (const row of rows) {
-    const entry = byManager.get(row.manager);
+    const entry = byTeam.get(row.team);
     entry[row.position] = Number(((entry[row.position] || 0) + (row.points || 0)).toFixed(1));
     entry.total = Number((entry.total + (row.points || 0)).toFixed(1));
   }
   // Points For descending, not alphabetical.
-  const chartRows = [...byManager.values()].sort((a, b) => b.total - a.total);
+  const chartRows = [...byTeam.values()].sort((a, b) => b.total - a.total);
   return { chartRows, positions };
 }
 
-// Renders the manager's season total just past the end (right side) of
+// Renders the team's season total just past the end (right side) of
 // their stacked horizontal bar, vertically centered on the bar, rather
 // than that segment's own value.
 function TotalLabel(props) {
@@ -68,12 +68,12 @@ function TotalLabel(props) {
   );
 }
 
-// Managers who share a team (e.g. co-managed rosters) get names like
-// "PersonA / PersonB". A "/" is the wrap signal: split there and stack
-// the pieces on their own lines so the label stays compact instead of
-// forcing extra Y-axis width for the combined length. Names without a
-// "/" render on a single line, unrotated.
-function ManagerTick({ x, y, payload }) {
+// Some team names include a "/" (e.g. co-managed rosters keeping both
+// owners' names in the team name). A "/" is the wrap signal: split
+// there and stack the pieces on their own lines so the label stays
+// compact instead of forcing extra Y-axis width for the combined
+// length. Names without a "/" render on a single line.
+function TeamTick({ x, y, payload }) {
   const raw = payload.value;
   const lines = raw.includes("/") ? raw.split("/").map((s) => s.trim()) : [raw];
   const lineHeight = 13;
@@ -94,12 +94,12 @@ function ManagerTick({ x, y, payload }) {
 // the single longest full name.
 function estimateYAxisWidth(chartRows) {
   const CHAR_PX = 6.3; // rough average glyph width at the 11px tick font
-  const PADDING = 16; // tick-to-axis-line gap + a little breathing room
-  const MIN_WIDTH = 55;
+  const PADDING = 10; // tick-to-axis-line gap + a little breathing room
+  const MIN_WIDTH = 50;
   const MAX_WIDTH = 190;
   let maxChars = 0;
   for (const row of chartRows) {
-    const lines = row.manager.includes("/") ? row.manager.split("/").map((s) => s.trim()) : [row.manager];
+    const lines = row.team.includes("/") ? row.team.split("/").map((s) => s.trim()) : [row.team];
     for (const line of lines) {
       if (line.length > maxChars) maxChars = line.length;
     }
@@ -110,12 +110,12 @@ function estimateYAxisWidth(chartRows) {
 function aggregateByPlayer(rows) {
   const byPlayer = new Map();
   for (const row of rows) {
-    const key = `${row.player}|${row.position}|${row.manager}`;
+    const key = `${row.player}|${row.position}|${row.team}`;
     if (!byPlayer.has(key)) {
       byPlayer.set(key, {
         player: row.player,
         position: row.position,
-        manager: row.manager,
+        team: row.team,
         total: 0,
         weeks: 0,
       });
@@ -142,14 +142,14 @@ function PlayersInner() {
   const { data, loading, error } = useJson(activeSeason ? `/api/players?season=${activeSeason}` : null);
   const rows = data?.rows || [];
 
-  const [managerFilter, setManagerFilter] = useState("All");
+  const [teamFilter, setTeamFilter] = useState("All");
   const [positionFilter, setPositionFilter] = useState("All");
   const [playerSearch, setPlayerSearch] = useState("");
   const [weekRange, setWeekRange] = useState(null); // [min, max] -- null until weeks are known
   const [sortKey, setSortKey] = useState("total");
   const [sortDir, setSortDir] = useState("desc");
 
-  const managers = useMemo(() => ["All", ...new Set(rows.map((r) => r.manager))].sort(), [rows]);
+  const teams = useMemo(() => ["All", ...new Set(rows.map((r) => r.team))].sort(), [rows]);
   const positions = useMemo(() => ["All", ...new Set(rows.map((r) => r.position))].sort(), [rows]);
   const availableWeeks = useMemo(
     () => [...new Set(rows.map((r) => r.week))].sort((a, b) => a - b),
@@ -185,7 +185,7 @@ function PlayersInner() {
     setWeekRange([rangeMin, next]);
   }
 
-  // Week range scopes both the chart and the table below it; manager/
+  // Week range scopes both the chart and the table below it; team/
   // position/search filters also apply to both.
   const weekScopedRows = useMemo(() => {
     if (!weekRange) return rows;
@@ -194,15 +194,15 @@ function PlayersInner() {
 
   const filteredRows = useMemo(() => {
     return weekScopedRows.filter((r) => {
-      if (managerFilter !== "All" && r.manager !== managerFilter) return false;
+      if (teamFilter !== "All" && r.team !== teamFilter) return false;
       if (positionFilter !== "All" && r.position !== positionFilter) return false;
       if (playerSearch && !r.player.toLowerCase().includes(playerSearch.toLowerCase())) return false;
       return true;
     });
-  }, [weekScopedRows, managerFilter, positionFilter, playerSearch]);
+  }, [weekScopedRows, teamFilter, positionFilter, playerSearch]);
 
   const { chartRows, positions: chartPositions } = useMemo(
-    () => aggregateByManagerPosition(filteredRows),
+    () => aggregateByTeamPosition(filteredRows),
     [filteredRows]
   );
 
@@ -241,13 +241,13 @@ function PlayersInner() {
         <>
           <div className="panel">
             <h2>
-              Points by Position, per Manager (sorted by Points For)
-              {managerFilter !== "All" || positionFilter !== "All" || playerSearch ? " (filtered)" : ""}
+              Points by Position, per Team (sorted by Points For)
+              {teamFilter !== "All" || positionFilter !== "All" || playerSearch ? " (filtered)" : ""}
             </h2>
             {chartRows.length > 0 ? (
               // layout="vertical" makes Recharts draw horizontal bars: the
-              // category (manager) moves to the YAxis and the value axis
-              // becomes the XAxis, so manager names render fully horizontal
+              // category (team) moves to the YAxis and the value axis
+              // becomes the XAxis, so team names render fully horizontal
               // instead of rotated. The YAxis width is computed from the
               // actual (post-wrap) label lengths so the left-side padding
               // stays as small as the longest visible line requires.
@@ -260,11 +260,13 @@ function PlayersInner() {
                   <CartesianGrid stroke="#2a2e37" horizontal={false} />
                   <XAxis type="number" stroke="#9aa1ad" />
                   <YAxis
-                    dataKey="manager"
+                    dataKey="team"
                     type="category"
                     stroke="#9aa1ad"
                     width={yAxisWidth}
-                    tick={(props) => <ManagerTick {...props} />}
+                    tickMargin={2}
+                    tickLine={false}
+                    tick={(props) => <TeamTick {...props} />}
                   />
                   <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
                   <Legend />
@@ -283,9 +285,9 @@ function PlayersInner() {
           </div>
 
           <div className="controls">
-            <select value={managerFilter} onChange={(e) => setManagerFilter(e.target.value)}>
-              {managers.map((m) => (
-                <option key={m} value={m}>{m === "All" ? "All Managers" : m}</option>
+            <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}>
+              {teams.map((t) => (
+                <option key={t} value={t}>{t === "All" ? "All Teams" : t}</option>
               ))}
             </select>
             <select value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)}>
@@ -358,14 +360,14 @@ function PlayersInner() {
           </div>
 
           <div className="panel">
-            <h2>Player Totals {managerFilter !== "All" || positionFilter !== "All" || playerSearch || !isFullRange ? "(filtered)" : ""}</h2>
+            <h2>Player Totals {teamFilter !== "All" || positionFilter !== "All" || playerSearch || !isFullRange ? "(filtered)" : ""}</h2>
             <div className="table-scroll">
               <table className="players-table">
                 <thead>
                   <tr>
                     <th className="sticky-col" onClick={() => toggleSort("player")}>Player</th>
                     <th className="sticky-col th-vertical" onClick={() => toggleSort("position")}>Position</th>
-                    <th className="sticky-col" onClick={() => toggleSort("manager")}>Manager</th>
+                    <th className="sticky-col" onClick={() => toggleSort("team")}>Team</th>
                     <th title="Total Points" onClick={() => toggleSort("total")}>PF</th>
                     <th className="th-vertical" title="Weeks Started" onClick={() => toggleSort("weeks")}>Wks Started</th>
                     <th title="Avg / Week" onClick={() => toggleSort("avg")}>Avg / Wk</th>
@@ -373,10 +375,10 @@ function PlayersInner() {
                 </thead>
                 <tbody>
                   {playerTotals.map((row) => (
-                    <tr key={`${row.player}-${row.position}-${row.manager}`}>
+                    <tr key={`${row.player}-${row.position}-${row.team}`}>
                       <td className="sticky-col truncate-cell" title={row.player}>{row.player}</td>
                       <td className="sticky-col">{row.position}</td>
-                      <td className="sticky-col truncate-cell" title={row.manager}>{row.manager}</td>
+                      <td className="sticky-col truncate-cell" title={row.team}>{row.team}</td>
                       <td>{row.total}</td>
                       <td>{row.weeks}</td>
                       <td>{row.avg}</td>
