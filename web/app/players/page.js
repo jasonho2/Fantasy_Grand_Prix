@@ -26,6 +26,21 @@ const POSITION_COLORS = {
 };
 const FALLBACK_COLOR = "#9aa1ad";
 
+// Chart/legend stacking order (offense skill positions, then D/ST, then
+// K) rather than alphabetical. Any position not in this list (shouldn't
+// happen, but just in case) sorts after the known ones, alphabetically.
+const POSITION_ORDER = ["QB", "RB", "WR", "TE", "D/ST", "K"];
+function sortPositions(positions) {
+  return [...positions].sort((a, b) => {
+    const ai = POSITION_ORDER.indexOf(a);
+    const bi = POSITION_ORDER.indexOf(b);
+    if (ai === -1 && bi === -1) return a.localeCompare(b);
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+}
+
 // Track width the slider line/fill are drawn at, plus the thumb radius
 // reserved as padding on each side so a thumb centered at either extreme
 // stays fully inside the slider's bounding box instead of poking past it.
@@ -34,7 +49,7 @@ const SLIDER_THUMB_RADIUS = 7;
 
 function aggregateByTeamPosition(rows) {
   const teams = [...new Set(rows.map((r) => r.team))].sort();
-  const positions = [...new Set(rows.map((r) => r.position))].sort();
+  const positions = sortPositions([...new Set(rows.map((r) => r.position))]);
   const byTeam = new Map(teams.map((t) => [t, { team: t, total: 0 }]));
   for (const row of rows) {
     const entry = byTeam.get(row.team);
