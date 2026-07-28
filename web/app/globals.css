@@ -297,6 +297,26 @@ nav.topnav a.active {
   }
 }
 
+/* Phone in landscape: noticeably more width to work with than portrait,
+   so let the Team column breathe (most names fit on one line instead of
+   wrapping to two or three) while squeezing the narrow data columns
+   (Rank, Wk N, Total, PF) down further -- their content is only a
+   couple characters, so tighter padding still keeps every header on a
+   single line. */
+@media (max-width: 720px) and (orientation: landscape) {
+  .contests-table th:nth-child(2).sticky-col,
+  .contests-table td:nth-child(2).sticky-col {
+    width: 170px;
+    max-width: 170px;
+  }
+
+  .contests-table th:not(:nth-child(2)),
+  .contests-table td:not(:nth-child(2)) {
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+}
+
 .controls {
   display: flex;
   gap: 12px;
