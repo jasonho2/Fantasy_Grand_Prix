@@ -244,6 +244,16 @@ nav.topnav a.active {
     white-space: nowrap;
   }
 
+  /* Opposite of .truncate-cell -- wraps onto multiple lines within the
+     column's fixed width instead of clipping with an ellipsis, so the
+     full name stays visible. */
+  .wrap-cell {
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: break-word;
+    line-height: 1.25;
+  }
+
   .standings-table th.sticky-col,
   .standings-table td.sticky-col {
     left: 0;
@@ -271,8 +281,13 @@ nav.topnav a.active {
     max-width: 140px;
     box-shadow: 3px 0 6px -2px rgba(0, 0, 0, 0.5);
   }
-  .contests-table td:nth-child(2).sticky-col .truncate-cell {
-    max-width: 96px;
+
+  /* Wks Started needs two lines ("Wks" / "Started") even when the table
+     is squeezed on a narrow/portrait screen -- give it a floor so
+     "Started" itself never has to break onto a third line. */
+  .players-table th:nth-child(5),
+  .players-table td:nth-child(5) {
+    min-width: 64px;
   }
 }
 

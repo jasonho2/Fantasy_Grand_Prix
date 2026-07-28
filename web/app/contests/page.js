@@ -107,7 +107,7 @@ function ContestPanel({ contest }) {
               <tr key={row.team} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
                 <td>{row.displayRank}</td>
                 <td className="sticky-col">
-                  <span className="truncate-cell" style={{ display: "inline-block", verticalAlign: "middle" }} title={row.team}>
+                  <span className="wrap-cell" style={{ display: "inline-block", verticalAlign: "middle" }}>
                     {row.team}
                   </span>
                   {row.displayRank === 1 && (
