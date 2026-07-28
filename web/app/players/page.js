@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   BarChart,
@@ -91,7 +91,7 @@ function PlayersInner() {
   const [managerFilter, setManagerFilter] = useState("All");
   const [positionFilter, setPositionFilter] = useState("All");
   const [playerSearch, setPlayerSearch] = useState("");
-  const [selectedWeeks, setSelectedWeeks] = useState([]); // empty = all weeks
+  const [weekRange, setWeekRange] = useState(null); // [min, max] -- null until weeks are known
   const [sortKey, setSortKey] = useState("total");
   const [sortDir, setSortDir] = useState("desc");
 
@@ -101,20 +101,39 @@ function PlayersInner() {
     () => [...new Set(rows.map((r) => r.week))].sort((a, b) => a - b),
     [rows]
   );
+  const seasonMinWeek = availableWeeks[0] ?? 1;
+  const seasonMaxWeek = availableWeeks[availableWeeks.length - 1] ?? 1;
 
-  function toggleWeek(week) {
-    setSelectedWeeks((prev) =>
-      prev.includes(week) ? prev.filter((w) => w !== week) : [...prev, week].sort((a, b) => a - b)
-    );
+  // Reset to the full range whenever the available weeks change (e.g. on
+  // season switch), so a leftover range from a prior season can't silently
+  // filter out everything.
+  useEffect(() => {
+    if (availableWeeks.length > 0) {
+      setWeekRange([seasonMinWeek, seasonMaxWeek]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seasonMinWeek, seasonMaxWeek]);
+
+  const [rangeMin, rangeMax] = weekRange ?? [seasonMinWeek, seasonMaxWeek];
+  const isFullRange = rangeMin === seasonMinWeek && rangeMax === seasonMaxWeek;
+
+  function handleMinChange(value) {
+    const next = Math.min(Number(value), rangeMax);
+    setWeekRange([next, rangeMax]);
   }
 
-  // Week selection scopes both the chart and the table below it; manager/
+  function handleMaxChange(value) {
+    const next = Math.max(Number(value), rangeMin);
+    setWeekRange([rangeMin, next]);
+  }
+
+  // Week range scopes both the chart and the table below it; manager/
   // position/search only narrow the table (the chart stays a full
   // manager-vs-manager comparison for whatever weeks are in scope).
   const weekScopedRows = useMemo(() => {
-    if (selectedWeeks.length === 0) return rows;
-    return rows.filter((r) => selectedWeeks.includes(r.week));
-  }, [rows, selectedWeeks]);
+    if (!weekRange) return rows;
+    return rows.filter((r) => r.week >= rangeMin && r.week <= rangeMax);
+  }, [rows, weekRange, rangeMin, rangeMax]);
 
   const { chartRows, positions: chartPositions } = useMemo(
     () => aggregateByManagerPosition(weekScopedRows),
@@ -148,12 +167,7 @@ function PlayersInner() {
     }
   }
 
-  const weeksLabel =
-    selectedWeeks.length === 0
-      ? "All Weeks"
-      : selectedWeeks.length === 1
-      ? `Week ${selectedWeeks[0]}`
-      : `${selectedWeeks.length} Weeks Selected`;
+  const weeksLabel = rangeMin === rangeMax ? `Week ${rangeMin}` : `Weeks ${rangeMin}-${rangeMax}`;
 
   return (
     <>
@@ -208,29 +222,46 @@ function PlayersInner() {
               onChange={(e) => setPlayerSearch(e.target.value)}
             />
           </div>
-          <div className="controls" style={{ marginTop: -12, alignItems: "flex-start" }}>
-            <span style={{ fontSize: 14, color: "var(--text-dim)", paddingTop: 4 }}>{weeksLabel}:</span>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {availableWeeks.map((wk) => (
-                <button
-                  key={wk}
-                  type="button"
-                  onClick={() => toggleWeek(wk)}
-                  className={`week-chip${selectedWeeks.includes(wk) ? " selected" : ""}`}
-                >
-                  {wk}
-                </button>
-              ))}
-              {selectedWeeks.length > 0 && (
-                <button type="button" onClick={() => setSelectedWeeks([])} className="week-chip">
-                  Clear
-                </button>
-              )}
+          <div className="controls" style={{ marginTop: -12, alignItems: "center" }}>
+            <span style={{ fontSize: 14, color: "var(--text-dim)", minWidth: 110 }}>{weeksLabel}</span>
+            <div className="range-slider">
+              <div
+                className="range-slider-track-fill"
+                style={{
+                  left: `${((rangeMin - seasonMinWeek) / (seasonMaxWeek - seasonMinWeek || 1)) * 100}%`,
+                  right: `${100 - ((rangeMax - seasonMinWeek) / (seasonMaxWeek - seasonMinWeek || 1)) * 100}%`,
+                }}
+              />
+              <input
+                type="range"
+                min={seasonMinWeek}
+                max={seasonMaxWeek}
+                value={rangeMin}
+                onChange={(e) => handleMinChange(e.target.value)}
+                aria-label="Minimum week"
+              />
+              <input
+                type="range"
+                min={seasonMinWeek}
+                max={seasonMaxWeek}
+                value={rangeMax}
+                onChange={(e) => handleMaxChange(e.target.value)}
+                aria-label="Maximum week"
+              />
             </div>
+            {!isFullRange && (
+              <button
+                type="button"
+                className="week-chip"
+                onClick={() => setWeekRange([seasonMinWeek, seasonMaxWeek])}
+              >
+                Reset
+              </button>
+            )}
           </div>
 
           <div className="panel">
-            <h2>Player Totals {managerFilter !== "All" || positionFilter !== "All" || playerSearch || selectedWeeks.length > 0 ? "(filtered)" : ""}</h2>
+            <h2>Player Totals {managerFilter !== "All" || positionFilter !== "All" || playerSearch || !isFullRange ? "(filtered)" : ""}</h2>
             <table>
               <thead>
                 <tr>

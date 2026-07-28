@@ -82,6 +82,81 @@ nav.topnav a.active {
   font-weight: 600;
 }
 
+/* Dual-handle range slider, built from two overlapping native <input
+   type="range"> elements. Each one has a transparent track and only its
+   thumb is interactive (pointer-events re-enabled on the thumb pseudo
+   -element), so the two thumbs can be dragged independently. */
+.range-slider {
+  position: relative;
+  width: 240px;
+  height: 24px;
+}
+
+.range-slider::before {
+  content: "";
+  position: absolute;
+  top: 11px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.range-slider-track-fill {
+  position: absolute;
+  top: 11px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+.range-slider input[type="range"] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  margin: 0;
+  background: transparent;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.range-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  background: transparent;
+}
+
+.range-slider input[type="range"]::-moz-range-track {
+  height: 2px;
+  background: transparent;
+  border: none;
+}
+
+.range-slider input[type="range"]::-webkit-slider-thumb {
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  margin-top: -6px;
+  border: 2px solid var(--bg);
+}
+
+.range-slider input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg);
+}
+
 select, input[type="text"] {
   background: var(--panel);
   color: var(--text);

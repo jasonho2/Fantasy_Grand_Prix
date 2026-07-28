@@ -30,20 +30,6 @@ function MushroomIcon() {
   );
 }
 
-function FlowerIcon() {
-  const petals = [0, 72, 144, 216, 288];
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
-      <g transform="translate(12,12)">
-        {petals.map((deg) => (
-          <ellipse key={deg} cx="0" cy="-6" rx="3.4" ry="5.2" fill="#d9b64e" transform={`rotate(${deg})`} />
-        ))}
-        <circle cx="0" cy="0" r="3.2" fill="#ff9f5b" />
-      </g>
-    </svg>
-  );
-}
-
 function StarIcon() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
@@ -55,20 +41,11 @@ function StarIcon() {
   );
 }
 
-function SpecialIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 1l2.6 7.4L22 11l-7.4 2.6L12 21l-2.6-7.4L2 11l7.4-2.6Z" fill="#c77dff" />
-      <circle cx="18.5" cy="5.5" r="1.6" fill="#5b9dff" />
-    </svg>
-  );
-}
-
 const CUP_ICONS = {
   "Mushroom Cup": MushroomIcon,
-  "Flower Cup": FlowerIcon,
+  "Flower Cup": "\u{1F337}", // tulip
   "Star Cup": StarIcon,
-  "Special Cup": SpecialIcon,
+  "Special Cup": "\u{1F451}", // crown
 };
 
 function ContestPanel({ contest }) {
@@ -85,7 +62,11 @@ function ContestPanel({ contest }) {
   return (
     <div className="panel">
       <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {Icon && <Icon />}
+        {typeof Icon === "string" ? (
+          <span style={{ fontSize: 22, lineHeight: 1 }} aria-hidden="true">{Icon}</span>
+        ) : (
+          Icon && <Icon />
+        )}
         {contest.name} (Weeks {contest.start_week}-{contest.end_week}){" "}
         <span className={`badge ${STATUS_BADGE_CLASS[contest.status]}`}>{STATUS_LABEL[contest.status]}</span>
       </h2>

@@ -173,13 +173,17 @@ function StandingsInner() {
               {data.regularSeasonWeeks ? ` (Regular Season, Weeks 1-${data.regularSeasonWeeks})` : ""}
             </h2>
             {trendRows.length > 0 ? (
-              <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={trendRows}>
+              <ResponsiveContainer width="100%" height={420}>
+                <LineChart data={trendRows} margin={{ bottom: 12 }}>
                   <CartesianGrid stroke="#2a2e37" />
                   <XAxis dataKey="week" stroke="#9aa1ad" label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }} />
                   <YAxis stroke="#9aa1ad" />
                   <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
-                  <Legend payload={legendPayload} onClick={(e) => selectManager(e.value)} wrapperStyle={{ cursor: "pointer" }} />
+                  <Legend
+                    payload={legendPayload}
+                    onClick={(e) => selectManager(e.value)}
+                    wrapperStyle={{ cursor: "pointer", paddingTop: 20 }}
+                  />
                   {visibleManagers.map((mgr) => (
                     <Line
                       key={mgr}
@@ -208,8 +212,8 @@ function StandingsInner() {
                   : ""}
               </h2>
               {playoffTrendRows.length > 0 ? (
-                <ResponsiveContainer width="100%" height={400}>
-                  <LineChart data={playoffTrendRows}>
+                <ResponsiveContainer width="100%" height={420}>
+                  <LineChart data={playoffTrendRows} margin={{ bottom: 12 }}>
                     <CartesianGrid stroke="#2a2e37" />
                     <XAxis dataKey="week" stroke="#9aa1ad" label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }} />
                     <YAxis stroke="#9aa1ad" />
@@ -217,7 +221,7 @@ function StandingsInner() {
                     <Legend
                       payload={playoffLegendPayload}
                       onClick={(e) => selectManager(e.value)}
-                      wrapperStyle={{ cursor: "pointer" }}
+                      wrapperStyle={{ cursor: "pointer", paddingTop: 20 }}
                     />
                     {visiblePlayoffManagers.map((mgr) => (
                       <Line
