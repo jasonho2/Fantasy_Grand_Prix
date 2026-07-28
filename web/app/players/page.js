@@ -392,7 +392,7 @@ function PlayersInner() {
                 <tbody>
                   {playerTotals.map((row) => (
                     <tr key={`${row.player}-${row.position}-${row.team}`}>
-                      <td className="sticky-col truncate-cell" title={row.player}>{row.player}</td>
+                      <td className="sticky-col wrap-cell">{row.player}</td>
                       <td>{row.position}</td>
                       <td>{row.team}</td>
                       <td>{row.total}</td>
