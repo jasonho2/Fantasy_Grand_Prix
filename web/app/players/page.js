@@ -128,17 +128,11 @@ function PlayersInner() {
   }
 
   // Week range scopes both the chart and the table below it; manager/
-  // position/search only narrow the table (the chart stays a full
-  // manager-vs-manager comparison for whatever weeks are in scope).
+  // position/search filters also apply to both.
   const weekScopedRows = useMemo(() => {
     if (!weekRange) return rows;
     return rows.filter((r) => r.week >= rangeMin && r.week <= rangeMax);
   }, [rows, weekRange, rangeMin, rangeMax]);
-
-  const { chartRows, positions: chartPositions } = useMemo(
-    () => aggregateByManagerPosition(weekScopedRows),
-    [weekScopedRows]
-  );
 
   const filteredRows = useMemo(() => {
     return weekScopedRows.filter((r) => {
@@ -148,6 +142,11 @@ function PlayersInner() {
       return true;
     });
   }, [weekScopedRows, managerFilter, positionFilter, playerSearch]);
+
+  const { chartRows, positions: chartPositions } = useMemo(
+    () => aggregateByManagerPosition(filteredRows),
+    [filteredRows]
+  );
 
   const playerTotals = useMemo(() => {
     const agg = aggregateByPlayer(filteredRows);
@@ -181,7 +180,10 @@ function PlayersInner() {
       {data && (
         <>
           <div className="panel">
-            <h2>Points by Position, per Manager (sorted by Points For)</h2>
+            <h2>
+              Points by Position, per Manager (sorted by Points For)
+              {managerFilter !== "All" || positionFilter !== "All" || playerSearch ? " (filtered)" : ""}
+            </h2>
             {chartRows.length > 0 ? (
               <ResponsiveContainer width="100%" height={440}>
                 <BarChart data={chartRows} margin={{ top: 24, right: 0, left: 0, bottom: 0 }}>
