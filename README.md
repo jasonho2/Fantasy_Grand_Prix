@@ -96,28 +96,37 @@ above) whenever you want to refresh scores.
 ## Point-total contests (Contests page)
 
 Separate from the season-long win/loss standings, this league also runs
-point-total contests within specific week windows (e.g. weeks 1-4, 5-8,
-9-12, 13-17) -- cumulative points reset at the start of each window, highest
-total in the window wins.
+side-contests within specific week windows (currently weeks 1-3, 4-7, 8-11,
+12-15 for 2025 -- contest scoring stops at week 15 even though the season
+runs through week 17).
 
-These windows aren't hardcoded, since they can change by season or by
-commissioner choice. Define them in `config.json`:
+Scoring within a window is Mario-Kart-style placement points, not raw
+fantasy points: every week, all managers are ranked by that week's fantasy
+score (highest first) and earn placement points -- 1st: 12, 2nd: 10, 3rd: 9,
+4th: 8, 5th: 7, 6th: 6, 7th: 5, 8th: 4, 9th: 3, 10th: 2, 11th: 1, 12th: 0.
+These placement points accumulate across a window's weeks and determine the
+leaderboard ranking; a manager's raw fantasy-point total for the window is
+still shown, but only as a reference column, not the sort key.
+
+Windows aren't hardcoded, since they can change by season or by commissioner
+choice. Define them in `config.json`:
 
 ```json
 "contests": {
   "2025": [
-    { "name": "Contest 1", "start_week": 1, "end_week": 4 },
-    { "name": "Contest 2", "start_week": 5, "end_week": 8 },
-    { "name": "Contest 3", "start_week": 9, "end_week": 12 },
-    { "name": "Contest 4", "start_week": 13, "end_week": 17 }
+    { "name": "Contest 1", "start_week": 1, "end_week": 3 },
+    { "name": "Contest 2", "start_week": 4, "end_week": 7 },
+    { "name": "Contest 3", "start_week": 8, "end_week": 11 },
+    { "name": "Contest 4", "start_week": 12, "end_week": 15 }
   ]
 }
 ```
 
 Rerunning `python espn_pipeline.py --config config.json` loads/updates these
-windows (upsert, safe to rerun). The Contests page computes each manager's
-cumulative points within a window at query time from `weekly_manager_points`
--- nothing about a window's totals is stored directly, so editing the config
+windows (upsert, safe to rerun -- editing a window's weeks and rerunning
+updates it in place). The Contests page computes each manager's weekly rank
+and placement points at query time from `weekly_manager_points` -- nothing
+about a window's totals is stored directly, so editing the config
 and rerunning is all it takes to change a window's boundaries.
 
 ## Notes / known limitations
