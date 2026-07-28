@@ -14,13 +14,13 @@ const BASE_LINKS = [
 export default function Nav() {
   const pathname = usePathname();
   const { data: meta } = useJson("/api/meta");
-  const contestsLabel = meta?.leagueName ? `${meta.leagueName} Grand Prix` : "Contests";
+  const grandPrixLabel = meta?.leagueName ? `${meta.leagueName} Grand Prix` : "Contests";
 
-  const links = [...BASE_LINKS, { href: "/contests", label: contestsLabel }];
+  const links = [{ href: "/contests", label: grandPrixLabel }, ...BASE_LINKS];
 
   return (
     <nav className="topnav">
-      <span className="brand">ESPN Fantasy Football</span>
+      <span className="brand">{grandPrixLabel}</span>
       {links.map((link) => (
         <Link key={link.href} href={link.href} className={pathname === link.href ? "active" : ""}>
           {link.label}

@@ -46,9 +46,9 @@ function aggregateByManagerPosition(rows) {
   return { chartRows, positions };
 }
 
-// [HORIZONTAL BAR PREVIEW] Renders the manager's season total just past
-// the end (right side) of their stacked horizontal bar, vertically
-// centered on the bar, rather than that segment's own value.
+// Renders the manager's season total just past the end (right side) of
+// their stacked horizontal bar, vertically centered on the bar, rather
+// than that segment's own value.
 function TotalLabel(props) {
   const { x, y, width, height, value, index, data } = props;
   if (value == null || !data?.[index]) return null;
@@ -66,6 +66,45 @@ function TotalLabel(props) {
       {total}
     </text>
   );
+}
+
+// Managers who share a team (e.g. co-managed rosters) get names like
+// "PersonA / PersonB". A "/" is the wrap signal: split there and stack
+// the pieces on their own lines so the label stays compact instead of
+// forcing extra Y-axis width for the combined length. Names without a
+// "/" render on a single line, unrotated.
+function ManagerTick({ x, y, payload }) {
+  const raw = payload.value;
+  const lines = raw.includes("/") ? raw.split("/").map((s) => s.trim()) : [raw];
+  const lineHeight = 13;
+  const firstDy = -((lines.length - 1) * lineHeight) / 2;
+  return (
+    <text x={x} y={y} textAnchor="end" fill="#9aa1ad" fontSize={12}>
+      {lines.map((line, i) => (
+        <tspan key={i} x={x} dy={i === 0 ? firstDy : lineHeight}>
+          {line}
+        </tspan>
+      ))}
+    </text>
+  );
+}
+
+// Reserve just enough Y-axis width for the longest line that will
+// actually be rendered (post-wrap), instead of a fixed value sized for
+// the single longest full name.
+function estimateYAxisWidth(chartRows) {
+  const CHAR_PX = 7; // rough average glyph width at 12px tick font
+  const PADDING = 24; // tick-to-axis-line gap + a little breathing room
+  const MIN_WIDTH = 70;
+  const MAX_WIDTH = 220;
+  let maxChars = 0;
+  for (const row of chartRows) {
+    const lines = row.manager.includes("/") ? row.manager.split("/").map((s) => s.trim()) : [row.manager];
+    for (const line of lines) {
+      if (line.length > maxChars) maxChars = line.length;
+    }
+  }
+  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, maxChars * CHAR_PX + PADDING));
 }
 
 function aggregateByPlayer(rows) {
@@ -167,6 +206,8 @@ function PlayersInner() {
     [filteredRows]
   );
 
+  const yAxisWidth = useMemo(() => estimateYAxisWidth(chartRows), [chartRows]);
+
   const playerTotals = useMemo(() => {
     const agg = aggregateByPlayer(filteredRows);
     agg.sort((a, b) => {
@@ -204,20 +245,27 @@ function PlayersInner() {
               {managerFilter !== "All" || positionFilter !== "All" || playerSearch ? " (filtered)" : ""}
             </h2>
             {chartRows.length > 0 ? (
-              // [HORIZONTAL BAR PREVIEW] layout="vertical" makes Recharts draw
-              // horizontal bars: the category (manager) moves to the YAxis and
-              // the value axis becomes the XAxis. This lets manager names
-              // render fully horizontal instead of rotated, so long names
-              // never need to be clipped or projected past a margin.
+              // layout="vertical" makes Recharts draw horizontal bars: the
+              // category (manager) moves to the YAxis and the value axis
+              // becomes the XAxis, so manager names render fully horizontal
+              // instead of rotated. The YAxis width is computed from the
+              // actual (post-wrap) label lengths so the left-side padding
+              // stays as small as the longest visible line requires.
               <ResponsiveContainer width="100%" height={Math.max(320, chartRows.length * 42 + 80)}>
                 <BarChart
                   data={chartRows}
                   layout="vertical"
-                  margin={{ top: 24, right: 60, left: 10, bottom: 10 }}
+                  margin={{ top: 24, right: 60, left: 4, bottom: 10 }}
                 >
                   <CartesianGrid stroke="#2a2e37" horizontal={false} />
                   <XAxis type="number" stroke="#9aa1ad" />
-                  <YAxis dataKey="manager" type="category" stroke="#9aa1ad" width={220} />
+                  <YAxis
+                    dataKey="manager"
+                    type="category"
+                    stroke="#9aa1ad"
+                    width={yAxisWidth}
+                    tick={(props) => <ManagerTick {...props} />}
+                  />
                   <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
                   <Legend />
                   {chartPositions.map((pos, i) => (
