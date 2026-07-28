@@ -127,7 +127,15 @@ CREATE VIEW weekly_manager_points AS
 CREATE TABLE IF NOT EXISTS leagues (
     season INTEGER PRIMARY KEY,
     espn_league_id INTEGER NOT NULL,
-    league_name TEXT
+    league_name TEXT,
+    -- Length of the regular season in weeks. Drives the Season Leaderboard
+    -- (standings + regular-season points trend are scoped to weeks
+    -- 1..regular_season_weeks) and the separate playoff points trend
+    -- (regular_season_weeks+1..latest played week). Configured per season
+    -- in config.json, same reasoning as contest_windows -- this varies by
+    -- season/league setup and ESPN doesn't expose it in a field reliable
+    -- enough to trust auto-detecting.
+    regular_season_weeks INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS contest_windows (
@@ -148,6 +156,23 @@ def _split_statements(sql):
     conn.executescript(); libsql's execute() runs one statement at a time,
     so we split and loop -- this works identically on both backends."""
     return [s.strip() for s in sql.split(";") if s.strip()]
+
+
+# Columns added to existing tables after they first shipped. "CREATE TABLE
+# IF NOT EXISTS" is a no-op once the table already exists, so adding a
+# column to SCHEMA_SQL alone does nothing for databases created before that
+# change -- this list is the migration path for those. Safe to run every
+# connect(): each entry is only applied if the column is actually missing.
+COLUMN_MIGRATIONS = [
+    ("leagues", "regular_season_weeks", "INTEGER"),
+]
+
+
+def _apply_column_migrations(conn):
+    for table, column, coltype in COLUMN_MIGRATIONS:
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
 
 
 def connect(db_path):
@@ -179,6 +204,7 @@ def connect(db_path):
 
     for statement in _split_statements(SCHEMA_SQL):
         conn.execute(statement)
+    _apply_column_migrations(conn)
     return conn
 
 
@@ -236,14 +262,18 @@ def get_or_create_player(conn, espn_player_id, name, position):
     return row[0]
 
 
-def set_league_info(conn, season, espn_league_id, league_name):
+def set_league_info(conn, season, espn_league_id, league_name, regular_season_weeks=None):
+    """regular_season_weeks: pass None to leave an existing value alone
+    (e.g. if a later call only knows the league name) -- COALESCE keeps
+    whatever was already stored instead of clobbering it with NULL."""
     conn.execute(
-        """INSERT INTO leagues (season, espn_league_id, league_name)
-           VALUES (?, ?, ?)
+        """INSERT INTO leagues (season, espn_league_id, league_name, regular_season_weeks)
+           VALUES (?, ?, ?, ?)
            ON CONFLICT(season) DO UPDATE SET
                 espn_league_id = excluded.espn_league_id,
-                league_name = excluded.league_name""",
-        (season, espn_league_id, league_name),
+                league_name = excluded.league_name,
+                regular_season_weeks = COALESCE(excluded.regular_season_weeks, leagues.regular_season_weeks)""",
+        (season, espn_league_id, league_name, regular_season_weeks),
     )
     conn.commit()
 

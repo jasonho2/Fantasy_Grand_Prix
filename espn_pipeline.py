@@ -321,7 +321,16 @@ def player_rows_to_df(rows):
     return pd.DataFrame(rows)[PLAYER_DISPLAY_COLUMNS]
 
 
-def run_pipeline(league_id, years, espn_s2, swid, output_path=None, sqlite_path=None, contests_config=None):
+def run_pipeline(
+    league_id,
+    years,
+    espn_s2,
+    swid,
+    output_path=None,
+    sqlite_path=None,
+    contests_config=None,
+    regular_season_weeks_config=None,
+):
     if not output_path and not sqlite_path:
         raise ValueError("Need at least one of output_path (xlsx) or sqlite_path (db) to write to.")
 
@@ -360,7 +369,10 @@ def run_pipeline(league_id, years, espn_s2, swid, output_path=None, sqlite_path=
 
         if conn is not None:
             db_module.load_season(conn, year, team_manager, team_name, player_rows, matchup_records)
-            db_module.set_league_info(conn, year, league_id, league_name)
+            reg_season_weeks = (regular_season_weeks_config or {}).get(year) or (
+                regular_season_weeks_config or {}
+            ).get(str(year))
+            db_module.set_league_info(conn, year, league_id, league_name, reg_season_weeks)
             print(f"  Loaded {year} into {sqlite_path}")
 
             windows = (contests_config or {}).get(year) or (contests_config or {}).get(str(year))
@@ -418,12 +430,22 @@ def main():
     output = args.output if args.output is not None else cfg.get("output", f"espn_ff_{league_id}.xlsx")
     sqlite_path = args.sqlite if args.sqlite is not None else cfg.get("sqlite", f"espn_ff_{league_id}.db")
     contests_config = cfg.get("contests", {})
+    regular_season_weeks_config = cfg.get("regular_season_weeks", {})
 
     if not league_id or not years:
         print("league_id and years are required (via config.json or CLI flags).", file=sys.stderr)
         sys.exit(1)
 
-    run_pipeline(league_id, years, espn_s2, swid, output or None, sqlite_path or None, contests_config)
+    run_pipeline(
+        league_id,
+        years,
+        espn_s2,
+        swid,
+        output or None,
+        sqlite_path or None,
+        contests_config,
+        regular_season_weeks_config,
+    )
 
 
 if __name__ == "__main__":

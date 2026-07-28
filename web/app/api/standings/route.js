@@ -1,6 +1,10 @@
 import { query } from "@/lib/db";
 
 // Standings table (wins/losses/points) + weekly trend series, for one season.
+// Scoped to the regular season (weeks 1..regular_season_weeks) -- playoff
+// weeks are returned separately as playoffWeekly rather than folded into
+// the same standings/trend, since fantasy playoff results don't count
+// toward the overall record the same way regular-season games do.
 // GET /api/standings?season=2025
 export async function GET(request) {
   const season = Number(new URL(request.url).searchParams.get("season"));
@@ -8,15 +12,26 @@ export async function GET(request) {
     return Response.json({ error: "season query param is required" }, { status: 400 });
   }
 
+  const leagueRows = await query(
+    "SELECT regular_season_weeks FROM leagues WHERE season = ?",
+    [season]
+  ).catch(() => []);
+  // No configured cutoff -- treat every played week as "regular season"
+  // rather than silently hiding weeks nobody told us were playoffs.
+  const regularSeasonWeeks = leagueRows[0]?.regular_season_weeks ?? Infinity;
+  // Infinity isn't a valid SQL bind value -- substitute a sentinel large
+  // enough that "week <= sqlWeekCutoff" is always true when uncapped.
+  const sqlWeekCutoff = Number.isFinite(regularSeasonWeeks) ? regularSeasonWeeks : 999999;
+
   const standingsRows = await query(
     `WITH sides AS (
-       SELECT season, home_team_id AS team_id, home_points AS points_for, away_points AS points_against,
+       SELECT season, week, home_team_id AS team_id, home_points AS points_for, away_points AS points_against,
               CASE WHEN winner = 'HOME' THEN 1 ELSE 0 END AS win,
               CASE WHEN winner = 'AWAY' THEN 1 ELSE 0 END AS loss,
               CASE WHEN winner = 'TIE' THEN 1 ELSE 0 END AS tie
        FROM matchups WHERE is_bye = 0
        UNION ALL
-       SELECT season, away_team_id AS team_id, away_points AS points_for, home_points AS points_against,
+       SELECT season, week, away_team_id AS team_id, away_points AS points_for, home_points AS points_against,
               CASE WHEN winner = 'AWAY' THEN 1 ELSE 0 END AS win,
               CASE WHEN winner = 'HOME' THEN 1 ELSE 0 END AS loss,
               CASE WHEN winner = 'TIE' THEN 1 ELSE 0 END AS tie
@@ -33,13 +48,13 @@ export async function GET(request) {
      FROM sides s
      JOIN teams t ON t.team_id = s.team_id
      JOIN managers m ON m.manager_id = t.manager_id
-     WHERE s.season = ?
+     WHERE s.season = ? AND s.week <= ?
      GROUP BY s.team_id
      ORDER BY wins DESC, points_for DESC`,
-    [season]
+    [season, sqlWeekCutoff]
   );
 
-  const weekly = await query(
+  const allWeekly = await query(
     `SELECT wmp.week, m.manager_name AS manager, wmp.points
      FROM weekly_manager_points wmp
      JOIN teams t ON t.team_id = wmp.team_id
@@ -49,5 +64,14 @@ export async function GET(request) {
     [season]
   );
 
-  return Response.json({ season, standings: standingsRows, weekly });
+  const weekly = allWeekly.filter((r) => r.week <= regularSeasonWeeks);
+  const playoffWeekly = allWeekly.filter((r) => r.week > regularSeasonWeeks);
+
+  return Response.json({
+    season,
+    regularSeasonWeeks: Number.isFinite(regularSeasonWeeks) ? regularSeasonWeeks : null,
+    standings: standingsRows,
+    weekly,
+    playoffWeekly,
+  });
 }

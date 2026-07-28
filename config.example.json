@@ -5,6 +5,9 @@
   "swid": "",
   "output": "espn_ff_1083280.xlsx",
   "sqlite": "espn_ff_1083280.db",
+  "regular_season_weeks": {
+    "2025": 14
+  },
   "contests": {
     "2025": [
       { "name": "Contest 1", "start_week": 1, "end_week": 3 },

@@ -66,6 +66,11 @@ function StandingsInner() {
     [data]
   );
 
+  const { managers: playoffManagers, rows: playoffTrendRows } = useMemo(
+    () => (data?.playoffWeekly ? pivotWeekly(data.playoffWeekly) : { managers: [], rows: [] }),
+    [data]
+  );
+
   function toggleSort(key) {
     if (key === sortKey) {
       setSortDir(sortDir === "desc" ? "asc" : "desc");
@@ -87,7 +92,10 @@ function StandingsInner() {
       {data && (
         <>
           <div className="panel">
-            <h2>Season Leaderboard</h2>
+            <h2>
+              Season Leaderboard
+              {data.regularSeasonWeeks ? ` (Regular Season, Weeks 1-${data.regularSeasonWeeks})` : ""}
+            </h2>
             <table>
               <thead>
                 <tr>
@@ -118,7 +126,10 @@ function StandingsInner() {
           </div>
 
           <div className="panel">
-            <h2>Weekly Points Trend</h2>
+            <h2>
+              Weekly Points Trend
+              {data.regularSeasonWeeks ? ` (Regular Season, Weeks 1-${data.regularSeasonWeeks})` : ""}
+            </h2>
             {trendRows.length > 0 ? (
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart data={trendRows}>
@@ -143,6 +154,40 @@ function StandingsInner() {
               <div className="empty-state">No weekly data yet.</div>
             )}
           </div>
+
+          {data.regularSeasonWeeks != null && (
+            <div className="panel">
+              <h2>
+                Playoff Weekly Points Trend
+                {playoffTrendRows.length > 0
+                  ? ` (Weeks ${data.regularSeasonWeeks + 1}-${playoffTrendRows[playoffTrendRows.length - 1].week})`
+                  : ""}
+              </h2>
+              {playoffTrendRows.length > 0 ? (
+                <ResponsiveContainer width="100%" height={400}>
+                  <LineChart data={playoffTrendRows}>
+                    <CartesianGrid stroke="#2a2e37" />
+                    <XAxis dataKey="week" stroke="#9aa1ad" label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }} />
+                    <YAxis stroke="#9aa1ad" />
+                    <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
+                    <Legend />
+                    {playoffManagers.map((mgr, i) => (
+                      <Line
+                        key={mgr}
+                        type="monotone"
+                        dataKey={mgr}
+                        stroke={COLORS[i % COLORS.length]}
+                        dot={false}
+                        strokeWidth={2}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="empty-state">Playoffs haven&apos;t started yet.</div>
+              )}
+            </div>
+          )}
         </>
       )}
     </>
