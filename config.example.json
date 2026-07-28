@@ -4,5 +4,13 @@
   "espn_s2": "",
   "swid": "",
   "output": "espn_ff_1083280.xlsx",
-  "sqlite": "espn_ff_1083280.db"
+  "sqlite": "espn_ff_1083280.db",
+  "contests": {
+    "2025": [
+      { "name": "Contest 1", "start_week": 1, "end_week": 4 },
+      { "name": "Contest 2", "start_week": 5, "end_week": 8 },
+      { "name": "Contest 3", "start_week": 9, "end_week": 12 },
+      { "name": "Contest 4", "start_week": 13, "end_week": 17 }
+    ]
+  }
 }

@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/standings", label: "Standings & Trends" },
   { href: "/players", label: "Players & Positions" },
   { href: "/matchups", label: "Matchups & Schedule" },
+  { href: "/contests", label: "Contests" },
 ];
 
 export default function Nav() {

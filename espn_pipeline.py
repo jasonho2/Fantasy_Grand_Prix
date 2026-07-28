@@ -321,7 +321,7 @@ def player_rows_to_df(rows):
     return pd.DataFrame(rows)[PLAYER_DISPLAY_COLUMNS]
 
 
-def run_pipeline(league_id, years, espn_s2, swid, output_path=None, sqlite_path=None):
+def run_pipeline(league_id, years, espn_s2, swid, output_path=None, sqlite_path=None, contests_config=None):
     if not output_path and not sqlite_path:
         raise ValueError("Need at least one of output_path (xlsx) or sqlite_path (db) to write to.")
 
@@ -360,6 +360,11 @@ def run_pipeline(league_id, years, espn_s2, swid, output_path=None, sqlite_path=
         if conn is not None:
             db_module.load_season(conn, year, team_manager, team_name, player_rows, matchup_records)
             print(f"  Loaded {year} into {sqlite_path}")
+
+            windows = (contests_config or {}).get(year) or (contests_config or {}).get(str(year))
+            if windows:
+                db_module.set_contest_windows(conn, year, windows)
+                print(f"  Set {len(windows)} contest window(s) for {year}")
 
     if conn is not None:
         conn.close()
@@ -410,12 +415,13 @@ def main():
     swid = args.swid or cfg.get("swid", "")
     output = args.output if args.output is not None else cfg.get("output", f"espn_ff_{league_id}.xlsx")
     sqlite_path = args.sqlite if args.sqlite is not None else cfg.get("sqlite", f"espn_ff_{league_id}.db")
+    contests_config = cfg.get("contests", {})
 
     if not league_id or not years:
         print("league_id and years are required (via config.json or CLI flags).", file=sys.stderr)
         sys.exit(1)
 
-    run_pipeline(league_id, years, espn_s2, swid, output or None, sqlite_path or None)
+    run_pipeline(league_id, years, espn_s2, swid, output or None, sqlite_path or None, contests_config)
 
 
 if __name__ == "__main__":

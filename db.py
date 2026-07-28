@@ -33,6 +33,14 @@ matchups                one row per matchup per week (home vs away, with both sc
 weekly_manager_points   VIEW: unions the home/away sides of `matchups` into
                         one row per (season, week, team_id, points) -- the
                         manager's weekly total, so it isn't stored twice.
+contest_windows         one row per side-contest window (e.g. weeks 1-4,
+                        5-8, 9-12, 13-17) for a season. Not hardcoded --
+                        windows vary by season/commissioner, so they're
+                        defined in config.json's "contests" section and
+                        loaded via set_contest_windows(). A manager's score
+                        in a contest is just the sum of weekly_manager_points
+                        over that window's weeks (computed at query time,
+                        not stored).
 """
 
 import os
@@ -98,6 +106,17 @@ CREATE VIEW IF NOT EXISTS weekly_manager_points AS
     UNION ALL
     SELECT season, week, away_team_id AS team_id, away_points AS points
     FROM matchups WHERE away_team_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS contest_windows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    season INTEGER NOT NULL,
+    contest_name TEXT NOT NULL,
+    start_week INTEGER NOT NULL,
+    end_week INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL,
+    UNIQUE(season, contest_name)
+);
+CREATE INDEX IF NOT EXISTS idx_contest_windows_season ON contest_windows(season);
 """
 
 
@@ -192,6 +211,27 @@ def get_or_create_player(conn, espn_player_id, name, position):
         (name, position),
     ).fetchone()
     return row[0]
+
+
+def set_contest_windows(conn, season, windows):
+    """
+    windows: list of {"name": str, "start_week": int, "end_week": int}, in
+    the order they should be displayed. Upserts, so editing config.json and
+    rerunning updates the windows in place rather than duplicating them.
+    Windows removed from config.json are NOT auto-deleted here (safer
+    default) -- delete stale rows manually if a season's contest plan changes.
+    """
+    for i, w in enumerate(windows):
+        conn.execute(
+            """INSERT INTO contest_windows (season, contest_name, start_week, end_week, sort_order)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(season, contest_name) DO UPDATE SET
+                    start_week = excluded.start_week,
+                    end_week = excluded.end_week,
+                    sort_order = excluded.sort_order""",
+            (season, w["name"], w["start_week"], w["end_week"], i),
+        )
+    conn.commit()
 
 
 def load_season(conn, year, team_manager, team_name, player_rows, matchup_records):

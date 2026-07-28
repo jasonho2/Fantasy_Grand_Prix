@@ -87,11 +87,38 @@ above) whenever you want to refresh scores.
 
 - `espn_pipeline.py` -- pulls from ESPN's API, writes Excel and/or DB.
 - `db.py` -- schema + upsert loader, works against local SQLite or Turso.
-- `config.json` -- your league ID, years, ESPN cookies (gitignored).
+- `config.json` -- your league ID, years, ESPN cookies, contest windows (gitignored).
 - `web/` -- Next.js dashboard.
-  - `app/standings/`, `app/players/`, `app/matchups/` -- the three pages.
+  - `app/standings/`, `app/players/`, `app/matchups/`, `app/contests/` -- the four pages.
   - `app/api/*/route.js` -- API routes that query the database.
   - `lib/db.js` -- shared database client.
+
+## Point-total contests (Contests page)
+
+Separate from the season-long win/loss standings, this league also runs
+point-total contests within specific week windows (e.g. weeks 1-4, 5-8,
+9-12, 13-17) -- cumulative points reset at the start of each window, highest
+total in the window wins.
+
+These windows aren't hardcoded, since they can change by season or by
+commissioner choice. Define them in `config.json`:
+
+```json
+"contests": {
+  "2025": [
+    { "name": "Contest 1", "start_week": 1, "end_week": 4 },
+    { "name": "Contest 2", "start_week": 5, "end_week": 8 },
+    { "name": "Contest 3", "start_week": 9, "end_week": 12 },
+    { "name": "Contest 4", "start_week": 13, "end_week": 17 }
+  ]
+}
+```
+
+Rerunning `python espn_pipeline.py --config config.json` loads/updates these
+windows (upsert, safe to rerun). The Contests page computes each manager's
+cumulative points within a window at query time from `weekly_manager_points`
+-- nothing about a window's totals is stored directly, so editing the config
+and rerunning is all it takes to change a window's boundaries.
 
 ## Notes / known limitations
 
