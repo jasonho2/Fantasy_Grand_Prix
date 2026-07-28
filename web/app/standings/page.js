@@ -71,6 +71,33 @@ function StandingsInner() {
     [data]
   );
 
+  // Selecting a manager (via the standings table or either trend chart's
+  // legend/line) narrows both trend charts to just that manager. Selecting
+  // the same one again clears it back to showing everyone.
+  const [selectedManager, setSelectedManager] = useState(null);
+  function selectManager(mgr) {
+    setSelectedManager((prev) => (prev === mgr ? null : mgr));
+  }
+
+  const visibleManagers = selectedManager ? managers.filter((m) => m === selectedManager) : managers;
+  const visiblePlayoffManagers = selectedManager
+    ? playoffManagers.filter((m) => m === selectedManager)
+    : playoffManagers;
+
+  // Explicit legend payloads (rather than Recharts' default, which only
+  // lists currently-rendered Lines) so every manager stays clickable in the
+  // legend even while the chart itself is narrowed to just one line.
+  const legendPayload = managers.map((mgr, i) => ({
+    value: mgr,
+    type: "line",
+    color: COLORS[i % COLORS.length],
+  }));
+  const playoffLegendPayload = playoffManagers.map((mgr, i) => ({
+    value: mgr,
+    type: "line",
+    color: COLORS[i % COLORS.length],
+  }));
+
   function toggleSort(key) {
     if (key === sortKey) {
       setSortDir(sortDir === "desc" ? "asc" : "desc");
@@ -84,6 +111,14 @@ function StandingsInner() {
     <>
       <div className="controls">
         <SeasonSelect seasons={seasons} season={activeSeason} />
+        {selectedManager && (
+          <span style={{ fontSize: 14, color: "var(--text-dim)" }}>
+            Showing trend for <strong style={{ color: "var(--text)" }}>{selectedManager}</strong> --{" "}
+            <a href="#" onClick={(e) => { e.preventDefault(); setSelectedManager(null); }}>
+              show all
+            </a>
+          </span>
+        )}
       </div>
 
       {loading && <div className="loading-state">Loading standings...</div>}
@@ -110,7 +145,14 @@ function StandingsInner() {
               </thead>
               <tbody>
                 {sortedStandings.map((row) => (
-                  <tr key={row.manager}>
+                  <tr
+                    key={row.manager}
+                    onClick={() => selectManager(row.manager)}
+                    style={{
+                      cursor: "pointer",
+                      background: selectedManager === row.manager ? "rgba(91,157,255,0.12)" : undefined,
+                    }}
+                  >
                     <td>{row.manager}</td>
                     <td>{row.wins}</td>
                     <td>{row.losses}</td>
@@ -137,15 +179,17 @@ function StandingsInner() {
                   <XAxis dataKey="week" stroke="#9aa1ad" label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }} />
                   <YAxis stroke="#9aa1ad" />
                   <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
-                  <Legend />
-                  {managers.map((mgr, i) => (
+                  <Legend payload={legendPayload} onClick={(e) => selectManager(e.value)} wrapperStyle={{ cursor: "pointer" }} />
+                  {visibleManagers.map((mgr) => (
                     <Line
                       key={mgr}
                       type="monotone"
                       dataKey={mgr}
-                      stroke={COLORS[i % COLORS.length]}
+                      stroke={COLORS[managers.indexOf(mgr) % COLORS.length]}
                       dot={false}
                       strokeWidth={2}
+                      onClick={() => selectManager(mgr)}
+                      style={{ cursor: "pointer" }}
                     />
                   ))}
                 </LineChart>
@@ -170,15 +214,21 @@ function StandingsInner() {
                     <XAxis dataKey="week" stroke="#9aa1ad" label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }} />
                     <YAxis stroke="#9aa1ad" />
                     <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
-                    <Legend />
-                    {playoffManagers.map((mgr, i) => (
+                    <Legend
+                      payload={playoffLegendPayload}
+                      onClick={(e) => selectManager(e.value)}
+                      wrapperStyle={{ cursor: "pointer" }}
+                    />
+                    {visiblePlayoffManagers.map((mgr) => (
                       <Line
                         key={mgr}
                         type="monotone"
                         dataKey={mgr}
-                        stroke={COLORS[i % COLORS.length]}
+                        stroke={COLORS[playoffManagers.indexOf(mgr) % COLORS.length]}
                         dot={false}
                         strokeWidth={2}
+                        onClick={() => selectManager(mgr)}
+                        style={{ cursor: "pointer" }}
                       />
                     ))}
                   </LineChart>

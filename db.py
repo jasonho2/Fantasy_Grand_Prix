@@ -281,19 +281,20 @@ def set_league_info(conn, season, espn_league_id, league_name, regular_season_we
 def set_contest_windows(conn, season, windows):
     """
     windows: list of {"name": str, "start_week": int, "end_week": int}, in
-    the order they should be displayed. Upserts, so editing config.json and
-    rerunning updates the windows in place rather than duplicating them.
-    Windows removed from config.json are NOT auto-deleted here (safer
-    default) -- delete stale rows manually if a season's contest plan changes.
+    the order they should be displayed.
+
+    Replaces the whole set for the season (delete then re-insert) rather
+    than upserting by name. An upsert keyed on contest_name can't handle
+    renaming a window (e.g. "Contest 1" -> "Mushroom Cup") -- since the name
+    changed, it wouldn't match the old row and would just add a second one
+    instead of replacing it. Full replace is simple and correct for a small,
+    fully-config-driven list like this.
     """
+    conn.execute("DELETE FROM contest_windows WHERE season = ?", (season,))
     for i, w in enumerate(windows):
         conn.execute(
             """INSERT INTO contest_windows (season, contest_name, start_week, end_week, sort_order)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(season, contest_name) DO UPDATE SET
-                    start_week = excluded.start_week,
-                    end_week = excluded.end_week,
-                    sort_order = excluded.sort_order""",
+               VALUES (?, ?, ?, ?, ?)""",
             (season, w["name"], w["start_week"], w["end_week"], i),
         )
     conn.commit()

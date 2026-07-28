@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import SeasonSelect from "../components/SeasonSelect";
 import { useJson } from "../../lib/useJson";
@@ -15,6 +15,136 @@ const STATUS_BADGE_CLASS = {
   in_progress: "tie",
   upcoming: "bye",
 };
+
+// Simple original icons evoking each cup (not reproductions of Nintendo's
+// artwork/trademarks) so each contest panel is visually distinct at a glance.
+function MushroomIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M2 11a10 6 0 0 1 20 0Z" fill="#ff6b6b" />
+      <circle cx="8" cy="8.5" r="1.4" fill="#fff" />
+      <circle cx="14" cy="7" r="1.1" fill="#fff" />
+      <circle cx="17.5" cy="10" r="1" fill="#fff" />
+      <rect x="8.5" y="11" width="7" height="8" rx="3" fill="#f2e9d8" />
+    </svg>
+  );
+}
+
+function FlowerIcon() {
+  const petals = [0, 72, 144, 216, 288];
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+      <g transform="translate(12,12)">
+        {petals.map((deg) => (
+          <ellipse key={deg} cx="0" cy="-6" rx="3.4" ry="5.2" fill="#d9b64e" transform={`rotate(${deg})`} />
+        ))}
+        <circle cx="0" cy="0" r="3.2" fill="#ff9f5b" />
+      </g>
+    </svg>
+  );
+}
+
+function StarIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 2.5l2.7 6.2 6.6.6-5 4.5 1.5 6.6L12 16.9l-5.8 3.5 1.5-6.6-5-4.5 6.6-.6Z"
+        fill="#f0d84a"
+      />
+    </svg>
+  );
+}
+
+function SpecialIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 1l2.6 7.4L22 11l-7.4 2.6L12 21l-2.6-7.4L2 11l7.4-2.6Z" fill="#c77dff" />
+      <circle cx="18.5" cy="5.5" r="1.6" fill="#5b9dff" />
+    </svg>
+  );
+}
+
+const CUP_ICONS = {
+  "Mushroom Cup": MushroomIcon,
+  "Flower Cup": FlowerIcon,
+  "Star Cup": StarIcon,
+  "Special Cup": SpecialIcon,
+};
+
+function ContestPanel({ contest }) {
+  // Descending only, per spec -- just which column, not direction.
+  const [sortBy, setSortBy] = useState("contest_points");
+
+  const sortedLeaderboard = useMemo(() => {
+    const rows = [...contest.leaderboard].sort((a, b) => b[sortBy] - a[sortBy]);
+    return rows.map((row, i) => ({ ...row, displayRank: i + 1 }));
+  }, [contest.leaderboard, sortBy]);
+
+  const Icon = CUP_ICONS[contest.name];
+
+  return (
+    <div className="panel">
+      <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {Icon && <Icon />}
+        {contest.name} (Weeks {contest.start_week}-{contest.end_week}){" "}
+        <span className={`badge ${STATUS_BADGE_CLASS[contest.status]}`}>{STATUS_LABEL[contest.status]}</span>
+      </h2>
+
+      <div className="controls" style={{ marginBottom: 12 }}>
+        <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Sort by:</span>
+        <button
+          type="button"
+          className={`week-chip${sortBy === "contest_points" ? " selected" : ""}`}
+          onClick={() => setSortBy("contest_points")}
+        >
+          Total
+        </button>
+        <button
+          type="button"
+          className={`week-chip${sortBy === "fantasy_points" ? " selected" : ""}`}
+          onClick={() => setSortBy("fantasy_points")}
+        >
+          Fantasy Points (ref)
+        </button>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Manager</th>
+            {contest.weeks.map((wk) => (
+              <th key={wk}>Wk {wk}</th>
+            ))}
+            <th>Total</th>
+            <th>Fantasy Points (ref)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sortedLeaderboard.map((row) => (
+            <tr key={row.manager} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
+              <td>{row.displayRank}</td>
+              <td>
+                {row.manager}
+                {row.displayRank === 1 && (
+                  <span className="badge win" style={{ marginLeft: 8 }}>
+                    Leader
+                  </span>
+                )}
+              </td>
+              {row.weekly_points.map((pts, i) => (
+                <td key={contest.weeks[i]}>{pts ?? "—"}</td>
+              ))}
+              <td style={sortBy === "contest_points" ? { fontWeight: 700 } : undefined}>{row.contest_points}</td>
+              <td style={sortBy === "fantasy_points" ? { fontWeight: 700 } : undefined}>{row.fantasy_points}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {sortedLeaderboard.length === 0 && <div className="empty-state">No games played in this window yet.</div>}
+    </div>
+  );
+}
 
 function ContestsInner() {
   const searchParams = useSearchParams();
@@ -38,7 +168,8 @@ function ContestsInner() {
       <p style={{ color: "var(--text-dim)", fontSize: 14, marginTop: 0, marginBottom: 20 }}>
         Each week, every manager is ranked by that week&apos;s fantasy score and earns placement
         points (1st: 12, 2nd: 10, 3rd: 9, down to last: 0). Placement points accumulate within a
-        contest&apos;s weeks and determine the ranking below; total fantasy points are shown for
+        cup&apos;s weeks and determine the ranking below by default; use the sort toggle on each
+        cup to rank by total fantasy points instead. Fantasy points are otherwise shown for
         reference only.
       </p>
 
@@ -54,53 +185,7 @@ function ContestsInner() {
         </div>
       )}
 
-      {data &&
-        data.contests.map((contest) => (
-          <div className="panel" key={contest.name}>
-            <h2>
-              {contest.name} (Weeks {contest.start_week}-{contest.end_week}){" "}
-              <span className={`badge ${STATUS_BADGE_CLASS[contest.status]}`}>
-                {STATUS_LABEL[contest.status]}
-              </span>
-            </h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Manager</th>
-                  {contest.weeks.map((wk) => (
-                    <th key={wk}>Wk {wk}</th>
-                  ))}
-                  <th>Total</th>
-                  <th>Fantasy Points (ref)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contest.leaderboard.map((row) => (
-                  <tr key={row.manager} style={row.rank === 1 ? { fontWeight: 700 } : undefined}>
-                    <td>{row.rank}</td>
-                    <td>
-                      {row.manager}
-                      {row.rank === 1 && (
-                        <span className="badge win" style={{ marginLeft: 8 }}>
-                          Leader
-                        </span>
-                      )}
-                    </td>
-                    {row.weekly_points.map((pts, i) => (
-                      <td key={contest.weeks[i]}>{pts ?? "—"}</td>
-                    ))}
-                    <td style={{ fontWeight: 700 }}>{row.contest_points}</td>
-                    <td>{row.fantasy_points}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {contest.leaderboard.length === 0 && (
-              <div className="empty-state">No games played in this window yet.</div>
-            )}
-          </div>
-        ))}
+      {data && data.contests.map((contest) => <ContestPanel key={contest.name} contest={contest} />)}
     </>
   );
 }

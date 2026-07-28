@@ -11,6 +11,7 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  LabelList,
 } from "recharts";
 import SeasonSelect from "../components/SeasonSelect";
 import { useJson } from "../../lib/useJson";
@@ -28,12 +29,28 @@ const FALLBACK_COLOR = "#9aa1ad";
 function aggregateByManagerPosition(rows) {
   const managers = [...new Set(rows.map((r) => r.manager))].sort();
   const positions = [...new Set(rows.map((r) => r.position))].sort();
-  const byManager = new Map(managers.map((m) => [m, { manager: m }]));
+  const byManager = new Map(managers.map((m) => [m, { manager: m, total: 0 }]));
   for (const row of rows) {
     const entry = byManager.get(row.manager);
     entry[row.position] = Number(((entry[row.position] || 0) + (row.points || 0)).toFixed(1));
+    entry.total = Number((entry.total + (row.points || 0)).toFixed(1));
   }
-  return { chartRows: [...byManager.values()], positions };
+  // Points For descending, not alphabetical.
+  const chartRows = [...byManager.values()].sort((a, b) => b.total - a.total);
+  return { chartRows, positions };
+}
+
+// Renders the manager's season total above the top segment of their
+// stacked bar (rather than that segment's own value).
+function TotalLabel(props) {
+  const { x, y, width, value, index, data } = props;
+  if (value == null || !data?.[index]) return null;
+  const total = data[index].total;
+  return (
+    <text x={x + width / 2} y={y - 8} textAnchor="middle" fill="var(--text)" fontSize={12} fontWeight={600}>
+      {total}
+    </text>
+  );
 }
 
 function aggregateByPlayer(rows) {
@@ -74,22 +91,44 @@ function PlayersInner() {
   const [managerFilter, setManagerFilter] = useState("All");
   const [positionFilter, setPositionFilter] = useState("All");
   const [playerSearch, setPlayerSearch] = useState("");
+  const [selectedWeeks, setSelectedWeeks] = useState([]); // empty = all weeks
   const [sortKey, setSortKey] = useState("total");
   const [sortDir, setSortDir] = useState("desc");
 
   const managers = useMemo(() => ["All", ...new Set(rows.map((r) => r.manager))].sort(), [rows]);
   const positions = useMemo(() => ["All", ...new Set(rows.map((r) => r.position))].sort(), [rows]);
+  const availableWeeks = useMemo(
+    () => [...new Set(rows.map((r) => r.week))].sort((a, b) => a - b),
+    [rows]
+  );
 
-  const { chartRows, positions: chartPositions } = useMemo(() => aggregateByManagerPosition(rows), [rows]);
+  function toggleWeek(week) {
+    setSelectedWeeks((prev) =>
+      prev.includes(week) ? prev.filter((w) => w !== week) : [...prev, week].sort((a, b) => a - b)
+    );
+  }
+
+  // Week selection scopes both the chart and the table below it; manager/
+  // position/search only narrow the table (the chart stays a full
+  // manager-vs-manager comparison for whatever weeks are in scope).
+  const weekScopedRows = useMemo(() => {
+    if (selectedWeeks.length === 0) return rows;
+    return rows.filter((r) => selectedWeeks.includes(r.week));
+  }, [rows, selectedWeeks]);
+
+  const { chartRows, positions: chartPositions } = useMemo(
+    () => aggregateByManagerPosition(weekScopedRows),
+    [weekScopedRows]
+  );
 
   const filteredRows = useMemo(() => {
-    return rows.filter((r) => {
+    return weekScopedRows.filter((r) => {
       if (managerFilter !== "All" && r.manager !== managerFilter) return false;
       if (positionFilter !== "All" && r.position !== positionFilter) return false;
       if (playerSearch && !r.player.toLowerCase().includes(playerSearch.toLowerCase())) return false;
       return true;
     });
-  }, [rows, managerFilter, positionFilter, playerSearch]);
+  }, [weekScopedRows, managerFilter, positionFilter, playerSearch]);
 
   const playerTotals = useMemo(() => {
     const agg = aggregateByPlayer(filteredRows);
@@ -109,26 +148,17 @@ function PlayersInner() {
     }
   }
 
+  const weeksLabel =
+    selectedWeeks.length === 0
+      ? "All Weeks"
+      : selectedWeeks.length === 1
+      ? `Week ${selectedWeeks[0]}`
+      : `${selectedWeeks.length} Weeks Selected`;
+
   return (
     <>
       <div className="controls">
         <SeasonSelect seasons={seasons} season={activeSeason} />
-        <select value={managerFilter} onChange={(e) => setManagerFilter(e.target.value)}>
-          {managers.map((m) => (
-            <option key={m} value={m}>{m === "All" ? "All Managers" : m}</option>
-          ))}
-        </select>
-        <select value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)}>
-          {positions.map((p) => (
-            <option key={p} value={p}>{p === "All" ? "All Positions" : p}</option>
-          ))}
-        </select>
-        <input
-          type="text"
-          placeholder="Search player..."
-          value={playerSearch}
-          onChange={(e) => setPlayerSearch(e.target.value)}
-        />
       </div>
 
       {loading && <div className="loading-state">Loading player data...</div>}
@@ -137,17 +167,21 @@ function PlayersInner() {
       {data && (
         <>
           <div className="panel">
-            <h2>Points by Position, per Manager</h2>
+            <h2>Points by Position, per Manager (sorted by Points For)</h2>
             {chartRows.length > 0 ? (
-              <ResponsiveContainer width="100%" height={420}>
-                <BarChart data={chartRows}>
+              <ResponsiveContainer width="100%" height={440}>
+                <BarChart data={chartRows} margin={{ top: 24, right: 0, left: 0, bottom: 0 }}>
                   <CartesianGrid stroke="#2a2e37" />
                   <XAxis dataKey="manager" stroke="#9aa1ad" angle={-20} textAnchor="end" height={70} />
                   <YAxis stroke="#9aa1ad" />
                   <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
                   <Legend />
-                  {chartPositions.map((pos) => (
-                    <Bar key={pos} dataKey={pos} stackId="pos" fill={POSITION_COLORS[pos] || FALLBACK_COLOR} />
+                  {chartPositions.map((pos, i) => (
+                    <Bar key={pos} dataKey={pos} stackId="pos" fill={POSITION_COLORS[pos] || FALLBACK_COLOR}>
+                      {i === chartPositions.length - 1 && (
+                        <LabelList dataKey={pos} content={(props) => <TotalLabel {...props} data={chartRows} />} />
+                      )}
+                    </Bar>
                   ))}
                 </BarChart>
               </ResponsiveContainer>
@@ -156,8 +190,47 @@ function PlayersInner() {
             )}
           </div>
 
+          <div className="controls">
+            <select value={managerFilter} onChange={(e) => setManagerFilter(e.target.value)}>
+              {managers.map((m) => (
+                <option key={m} value={m}>{m === "All" ? "All Managers" : m}</option>
+              ))}
+            </select>
+            <select value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)}>
+              {positions.map((p) => (
+                <option key={p} value={p}>{p === "All" ? "All Positions" : p}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              placeholder="Search player..."
+              value={playerSearch}
+              onChange={(e) => setPlayerSearch(e.target.value)}
+            />
+          </div>
+          <div className="controls" style={{ marginTop: -12, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 14, color: "var(--text-dim)", paddingTop: 4 }}>{weeksLabel}:</span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {availableWeeks.map((wk) => (
+                <button
+                  key={wk}
+                  type="button"
+                  onClick={() => toggleWeek(wk)}
+                  className={`week-chip${selectedWeeks.includes(wk) ? " selected" : ""}`}
+                >
+                  {wk}
+                </button>
+              ))}
+              {selectedWeeks.length > 0 && (
+                <button type="button" onClick={() => setSelectedWeeks([])} className="week-chip">
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
           <div className="panel">
-            <h2>Player Totals {managerFilter !== "All" || positionFilter !== "All" || playerSearch ? "(filtered)" : ""}</h2>
+            <h2>Player Totals {managerFilter !== "All" || positionFilter !== "All" || playerSearch || selectedWeeks.length > 0 ? "(filtered)" : ""}</h2>
             <table>
               <thead>
                 <tr>

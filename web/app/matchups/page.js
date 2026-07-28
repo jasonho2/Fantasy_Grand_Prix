@@ -18,6 +18,49 @@ function resultBadge(row, perspective) {
   return null;
 }
 
+// Cumulative W-L(-T) record for every manager as of the end of each week,
+// computed from the FULL season's matchups regardless of any manager
+// filter applied to the display -- a record has to account for every game
+// played, not just the ones currently shown.
+function computeRunningRecords(rows) {
+  const managers = new Set();
+  rows.forEach((r) => {
+    managers.add(r.home_manager);
+    if (r.away_manager) managers.add(r.away_manager);
+  });
+  const running = new Map([...managers].map((m) => [m, { wins: 0, losses: 0, ties: 0 }]));
+
+  const weeks = [...new Set(rows.map((r) => r.week))].sort((a, b) => a - b);
+  const snapshot = new Map(); // `${manager}|${week}` -> { wins, losses, ties }
+
+  for (const week of weeks) {
+    for (const row of rows.filter((r) => r.week === week)) {
+      if (row.is_bye || !row.away_manager) continue;
+      const home = running.get(row.home_manager);
+      const away = running.get(row.away_manager);
+      if (row.winner === "TIE") {
+        home.ties += 1;
+        away.ties += 1;
+      } else if (row.winner === "HOME") {
+        home.wins += 1;
+        away.losses += 1;
+      } else if (row.winner === "AWAY") {
+        away.wins += 1;
+        home.losses += 1;
+      }
+    }
+    for (const m of managers) {
+      snapshot.set(`${m}|${week}`, { ...running.get(m) });
+    }
+  }
+  return snapshot;
+}
+
+function formatRecord(rec) {
+  if (!rec) return "";
+  return rec.ties > 0 ? `${rec.wins}-${rec.losses}-${rec.ties}` : `${rec.wins}-${rec.losses}`;
+}
+
 function groupByWeek(rows) {
   const byWeek = new Map();
   for (const row of rows) {
@@ -75,6 +118,7 @@ function MatchupsInner() {
 
   const h2h = useMemo(() => headToHead(rows), [rows]);
   const weeks = useMemo(() => groupByWeek(filteredRows), [filteredRows]);
+  const records = useMemo(() => computeRunningRecords(rows), [rows]);
 
   return (
     <>
@@ -107,25 +151,40 @@ function MatchupsInner() {
                     </tr>
                   </thead>
                   <tbody>
-                    {weekRows.map((row, i) => (
-                      <tr key={i}>
-                        <td>{row.home_manager}</td>
-                        <td>
-                          {row.home_points?.toFixed?.(1) ?? row.home_points}
-                          {!row.is_bye && row.away_points != null && ` - ${row.away_points.toFixed?.(1) ?? row.away_points}`}
-                        </td>
-                        <td>{row.is_bye ? "—" : row.away_manager}</td>
-                        <td>
-                          {row.is_bye
-                            ? resultBadge(row)
-                            : managerFilter !== "All"
-                            ? resultBadge(row, row.home_manager === managerFilter ? "home" : "away")
-                            : row.winner === "TIE"
-                            ? <span className="badge tie">TIE</span>
-                            : `${row.winner === "HOME" ? row.home_manager : row.away_manager} won`}
-                        </td>
-                      </tr>
-                    ))}
+                    {weekRows.map((row, i) => {
+                      const homeWon = !row.is_bye && row.winner === "HOME";
+                      const awayWon = !row.is_bye && row.winner === "AWAY";
+                      const homeRec = formatRecord(records.get(`${row.home_manager}|${row.week}`));
+                      const awayRec = row.away_manager
+                        ? formatRecord(records.get(`${row.away_manager}|${row.week}`))
+                        : "";
+                      const winnerStyle = { color: "var(--win)", fontWeight: 700 };
+                      return (
+                        <tr key={i}>
+                          <td style={homeWon ? winnerStyle : undefined}>
+                            {row.home_manager}
+                            {homeRec && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({homeRec})</span>}
+                          </td>
+                          <td>
+                            {row.home_points?.toFixed?.(1) ?? row.home_points}
+                            {!row.is_bye && row.away_points != null && ` - ${row.away_points.toFixed?.(1) ?? row.away_points}`}
+                          </td>
+                          <td style={awayWon ? winnerStyle : undefined}>
+                            {row.is_bye ? "—" : row.away_manager}
+                            {awayRec && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({awayRec})</span>}
+                          </td>
+                          <td>
+                            {row.is_bye
+                              ? resultBadge(row)
+                              : managerFilter !== "All"
+                              ? resultBadge(row, row.home_manager === managerFilter ? "home" : "away")
+                              : row.winner === "TIE"
+                              ? <span className="badge tie">TIE</span>
+                              : `${row.winner === "HOME" ? row.home_manager : row.away_manager} won`}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

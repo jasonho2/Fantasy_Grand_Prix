@@ -10,10 +10,10 @@
   },
   "contests": {
     "2025": [
-      { "name": "Contest 1", "start_week": 1, "end_week": 3 },
-      { "name": "Contest 2", "start_week": 4, "end_week": 7 },
-      { "name": "Contest 3", "start_week": 8, "end_week": 11 },
-      { "name": "Contest 4", "start_week": 12, "end_week": 15 }
+      { "name": "Mushroom Cup", "start_week": 1, "end_week": 3 },
+      { "name": "Flower Cup", "start_week": 4, "end_week": 7 },
+      { "name": "Star Cup", "start_week": 8, "end_week": 11 },
+      { "name": "Special Cup", "start_week": 12, "end_week": 15 }
     ]
   }
 }
