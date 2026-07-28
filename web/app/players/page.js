@@ -359,12 +359,12 @@ function PlayersInner() {
 
           <div className="panel">
             <h2>Player Totals {managerFilter !== "All" || positionFilter !== "All" || playerSearch || !isFullRange ? "(filtered)" : ""}</h2>
-            <table>
+            <table className="players-table">
               <thead>
                 <tr>
-                  <th onClick={() => toggleSort("player")}>Player</th>
-                  <th onClick={() => toggleSort("position")}>Position</th>
-                  <th onClick={() => toggleSort("manager")}>Manager</th>
+                  <th className="sticky-col" onClick={() => toggleSort("player")}>Player</th>
+                  <th className="sticky-col" onClick={() => toggleSort("position")}>Position</th>
+                  <th className="sticky-col" onClick={() => toggleSort("manager")}>Manager</th>
                   <th onClick={() => toggleSort("total")}>Total Points</th>
                   <th onClick={() => toggleSort("weeks")}>Weeks Started</th>
                   <th onClick={() => toggleSort("avg")}>Avg / Week</th>
@@ -373,9 +373,9 @@ function PlayersInner() {
               <tbody>
                 {playerTotals.map((row) => (
                   <tr key={`${row.player}-${row.position}-${row.manager}`}>
-                    <td>{row.player}</td>
-                    <td>{row.position}</td>
-                    <td>{row.manager}</td>
+                    <td className="sticky-col truncate-cell" title={row.player}>{row.player}</td>
+                    <td className="sticky-col">{row.position}</td>
+                    <td className="sticky-col truncate-cell" title={row.manager}>{row.manager}</td>
                     <td>{row.total}</td>
                     <td>{row.weeks}</td>
                     <td>{row.avg}</td>

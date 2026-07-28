@@ -155,24 +155,100 @@ nav.topnav a.active {
   }
 
   .panel {
-    padding: 12px 14px;
+    padding: 10px 12px;
     overflow-x: auto;
   }
 
   .panel h2 {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   table {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   th, td {
-    padding: 6px 8px;
+    padding: 4px 6px;
   }
 
   .controls {
-    gap: 8px;
+    gap: 6px;
+  }
+
+  select, input[type="text"], input[type="number"] {
+    font-size: 13px;
+    padding: 5px 8px;
+  }
+
+  .badge {
+    font-size: 11px;
+    padding: 1px 6px;
+  }
+
+  /* Frozen "identity" columns: Manager, and anything to its left (Player/
+     Position, Rank), stay pinned while the rest of a wide table scrolls
+     horizontally underneath. Each table below fixes the pixel width of
+     its frozen columns so the sticky `left` offsets line up exactly;
+     text that doesn't fit gets an ellipsis (title attr carries the full
+     value) rather than wrapping or blowing out the column width. */
+  .sticky-col {
+    position: sticky;
+    z-index: 2;
+    background: var(--panel);
+  }
+
+  tr:hover td.sticky-col {
+    background: var(--panel);
+  }
+
+  .truncate-cell {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .standings-table th.sticky-col,
+  .standings-table td.sticky-col {
+    left: 0;
+    box-shadow: 3px 0 6px -2px rgba(0, 0, 0, 0.5);
+  }
+
+  .players-table th:nth-child(1).sticky-col,
+  .players-table td:nth-child(1).sticky-col {
+    left: 0;
+    width: 108px;
+    max-width: 108px;
+  }
+  .players-table th:nth-child(2).sticky-col,
+  .players-table td:nth-child(2).sticky-col {
+    left: 108px;
+    width: 46px;
+    max-width: 46px;
+  }
+  .players-table th:nth-child(3).sticky-col,
+  .players-table td:nth-child(3).sticky-col {
+    left: 154px;
+    width: 108px;
+    max-width: 108px;
+    box-shadow: 3px 0 6px -2px rgba(0, 0, 0, 0.5);
+  }
+
+  .contests-table th:nth-child(1).sticky-col,
+  .contests-table td:nth-child(1).sticky-col {
+    left: 0;
+    width: 32px;
+    max-width: 32px;
+  }
+  .contests-table th:nth-child(2).sticky-col,
+  .contests-table td:nth-child(2).sticky-col {
+    left: 32px;
+    width: 150px;
+    max-width: 150px;
+    box-shadow: 3px 0 6px -2px rgba(0, 0, 0, 0.5);
+  }
+  .contests-table td:nth-child(2).sticky-col .truncate-cell {
+    max-width: 82px;
   }
 }
 

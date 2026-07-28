@@ -5,19 +5,6 @@ import { useSearchParams } from "next/navigation";
 import SeasonSelect from "../components/SeasonSelect";
 import { useJson } from "../../lib/useJson";
 
-function resultBadge(row, perspective) {
-  if (row.is_bye) return <span className="badge bye">BYE</span>;
-  if (row.winner === "TIE") return <span className="badge tie">TIE</span>;
-  const homeWon = row.winner === "HOME";
-  if (perspective === "home") {
-    return homeWon ? <span className="badge win">W</span> : <span className="badge loss">L</span>;
-  }
-  if (perspective === "away") {
-    return homeWon ? <span className="badge loss">L</span> : <span className="badge win">W</span>;
-  }
-  return null;
-}
-
 // Cumulative W-L(-T) record for every manager as of the end of each week,
 // computed from the FULL season's matchups regardless of any manager
 // filter applied to the display -- a record has to account for every game
@@ -147,21 +134,23 @@ function MatchupsInner() {
                       <th>Home</th>
                       <th>Score</th>
                       <th>Away</th>
-                      <th>Result</th>
                     </tr>
                   </thead>
                   <tbody>
                     {weekRows.map((row, i) => {
                       const homeWon = !row.is_bye && row.winner === "HOME";
                       const awayWon = !row.is_bye && row.winner === "AWAY";
+                      const isTie = !row.is_bye && row.winner === "TIE";
                       const homeRec = formatRecord(records.get(`${row.home_manager}|${row.week}`));
                       const awayRec = row.away_manager
                         ? formatRecord(records.get(`${row.away_manager}|${row.week}`))
                         : "";
                       const winnerStyle = { color: "var(--win)", fontWeight: 700 };
+                      const tieStyle = { color: "var(--tie)" };
+                      const cellStyle = (won) => (won ? winnerStyle : isTie ? tieStyle : undefined);
                       return (
                         <tr key={i}>
-                          <td style={homeWon ? winnerStyle : undefined}>
+                          <td style={cellStyle(homeWon)}>
                             {row.home_manager}
                             {homeRec && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({homeRec})</span>}
                           </td>
@@ -169,18 +158,13 @@ function MatchupsInner() {
                             {row.home_points?.toFixed?.(1) ?? row.home_points}
                             {!row.is_bye && row.away_points != null && ` - ${row.away_points.toFixed?.(1) ?? row.away_points}`}
                           </td>
-                          <td style={awayWon ? winnerStyle : undefined}>
-                            {row.is_bye ? "—" : row.away_manager}
+                          <td style={cellStyle(awayWon)}>
+                            {row.is_bye ? (
+                              <span className="badge bye">BYE</span>
+                            ) : (
+                              row.away_manager
+                            )}
                             {awayRec && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({awayRec})</span>}
-                          </td>
-                          <td>
-                            {row.is_bye
-                              ? resultBadge(row)
-                              : managerFilter !== "All"
-                              ? resultBadge(row, row.home_manager === managerFilter ? "home" : "away")
-                              : row.winner === "TIE"
-                              ? <span className="badge tie">TIE</span>
-                              : `${row.winner === "HOME" ? row.home_manager : row.away_manager} won`}
                           </td>
                         </tr>
                       );

@@ -89,11 +89,11 @@ function ContestPanel({ contest }) {
         </button>
       </div>
 
-      <table>
+      <table className="contests-table">
         <thead>
           <tr>
-            <th>Rank</th>
-            <th>Manager</th>
+            <th className="sticky-col">Rank</th>
+            <th className="sticky-col">Manager</th>
             {contest.weeks.map((wk) => (
               <th key={wk}>Wk {wk}</th>
             ))}
@@ -104,11 +104,13 @@ function ContestPanel({ contest }) {
         <tbody>
           {sortedLeaderboard.map((row) => (
             <tr key={row.manager} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
-              <td>{row.displayRank}</td>
-              <td>
-                {row.manager}
+              <td className="sticky-col">{row.displayRank}</td>
+              <td className="sticky-col">
+                <span className="truncate-cell" style={{ display: "inline-block", verticalAlign: "middle" }} title={row.manager}>
+                  {row.manager}
+                </span>
                 {row.displayRank === 1 && (
-                  <span className="badge win" style={{ marginLeft: 8 }}>
+                  <span className="badge win" style={{ marginLeft: 6 }}>
                     Leader
                   </span>
                 )}
