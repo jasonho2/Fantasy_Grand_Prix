@@ -3,20 +3,25 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const LINKS = [
-  { href: "/standings", label: "Standings & Trends" },
+import { useJson } from "../../lib/useJson";
+
+const BASE_LINKS = [
+  { href: "/standings", label: "Season Leaderboard" },
   { href: "/players", label: "Players & Positions" },
   { href: "/matchups", label: "Matchups & Schedule" },
-  { href: "/contests", label: "Contests" },
 ];
 
 export default function Nav() {
   const pathname = usePathname();
+  const { data: meta } = useJson("/api/meta");
+  const contestsLabel = meta?.leagueName ? `${meta.leagueName} Grand Prix` : "Contests";
+
+  const links = [...BASE_LINKS, { href: "/contests", label: contestsLabel }];
 
   return (
     <nav className="topnav">
       <span className="brand">ESPN Fantasy Football</span>
-      {LINKS.map((link) => (
+      {links.map((link) => (
         <Link key={link.href} href={link.href} className={pathname === link.href ? "active" : ""}>
           {link.label}
         </Link>

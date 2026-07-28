@@ -32,7 +32,10 @@ function ContestsInner() {
         <SeasonSelect seasons={seasons} season={activeSeason} />
       </div>
 
-      <p style={{ color: "var(--text-dim)", fontSize: 14, marginTop: -8, marginBottom: 20 }}>
+      <h1 style={{ fontSize: 20, margin: "0 0 4px" }}>
+        {data?.leagueName ? `${data.leagueName} Grand Prix` : "Grand Prix"}
+      </h1>
+      <p style={{ color: "var(--text-dim)", fontSize: 14, marginTop: 0, marginBottom: 20 }}>
         Each week, every manager is ranked by that week&apos;s fantasy score and earns placement
         points (1st: 12, 2nd: 10, 3rd: 9, down to last: 0). Placement points accumulate within a
         contest&apos;s weeks and determine the ranking below; total fantasy points are shown for
@@ -65,7 +68,10 @@ function ContestsInner() {
                 <tr>
                   <th>Rank</th>
                   <th>Manager</th>
-                  <th>Contest Points</th>
+                  {contest.weeks.map((wk) => (
+                    <th key={wk}>Wk {wk}</th>
+                  ))}
+                  <th>Total</th>
                   <th>Fantasy Points (ref)</th>
                 </tr>
               </thead>
@@ -81,7 +87,10 @@ function ContestsInner() {
                         </span>
                       )}
                     </td>
-                    <td>{row.contest_points}</td>
+                    {row.weekly_points.map((pts, i) => (
+                      <td key={contest.weeks[i]}>{pts ?? "—"}</td>
+                    ))}
+                    <td style={{ fontWeight: 700 }}>{row.contest_points}</td>
                     <td>{row.fantasy_points}</td>
                   </tr>
                 ))}

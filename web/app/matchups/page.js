@@ -18,6 +18,15 @@ function resultBadge(row, perspective) {
   return null;
 }
 
+function groupByWeek(rows) {
+  const byWeek = new Map();
+  for (const row of rows) {
+    if (!byWeek.has(row.week)) byWeek.set(row.week, []);
+    byWeek.get(row.week).push(row);
+  }
+  return [...byWeek.entries()].sort((a, b) => a[0] - b[0]);
+}
+
 function headToHead(rows) {
   const pairs = new Map(); // key: sorted "A|B" -> { a, b, aWins, bWins, ties }
   for (const row of rows) {
@@ -65,6 +74,7 @@ function MatchupsInner() {
   }, [rows, managerFilter]);
 
   const h2h = useMemo(() => headToHead(rows), [rows]);
+  const weeks = useMemo(() => groupByWeek(filteredRows), [filteredRows]);
 
   return (
     <>
@@ -84,40 +94,43 @@ function MatchupsInner() {
         <>
           <div className="panel">
             <h2>Schedule &amp; Results</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Week</th>
-                  <th>Home</th>
-                  <th>Score</th>
-                  <th>Away</th>
-                  <th>Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map((row, i) => (
-                  <tr key={i}>
-                    <td>{row.week}</td>
-                    <td>{row.home_manager}</td>
-                    <td>
-                      {row.home_points?.toFixed?.(1) ?? row.home_points}
-                      {!row.is_bye && row.away_points != null && ` - ${row.away_points.toFixed?.(1) ?? row.away_points}`}
-                    </td>
-                    <td>{row.is_bye ? "—" : row.away_manager}</td>
-                    <td>
-                      {row.is_bye
-                        ? resultBadge(row)
-                        : managerFilter !== "All"
-                        ? resultBadge(row, row.home_manager === managerFilter ? "home" : "away")
-                        : row.winner === "TIE"
-                        ? <span className="badge tie">TIE</span>
-                        : `${row.winner === "HOME" ? row.home_manager : row.away_manager} won`}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {filteredRows.length === 0 && <div className="empty-state">No games yet.</div>}
+            {weeks.map(([week, weekRows]) => (
+              <div key={week} style={{ marginBottom: 24 }}>
+                <h3 style={{ fontSize: 14, color: "var(--text-dim)", margin: "0 0 8px" }}>Week {week}</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Home</th>
+                      <th>Score</th>
+                      <th>Away</th>
+                      <th>Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {weekRows.map((row, i) => (
+                      <tr key={i}>
+                        <td>{row.home_manager}</td>
+                        <td>
+                          {row.home_points?.toFixed?.(1) ?? row.home_points}
+                          {!row.is_bye && row.away_points != null && ` - ${row.away_points.toFixed?.(1) ?? row.away_points}`}
+                        </td>
+                        <td>{row.is_bye ? "—" : row.away_manager}</td>
+                        <td>
+                          {row.is_bye
+                            ? resultBadge(row)
+                            : managerFilter !== "All"
+                            ? resultBadge(row, row.home_manager === managerFilter ? "home" : "away")
+                            : row.winner === "TIE"
+                            ? <span className="badge tie">TIE</span>
+                            : `${row.winner === "HOME" ? row.home_manager : row.away_manager} won`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+            {weeks.length === 0 && <div className="empty-state">No games yet.</div>}
           </div>
 
           <div className="panel">

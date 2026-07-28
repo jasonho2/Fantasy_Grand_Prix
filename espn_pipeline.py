@@ -337,6 +337,7 @@ def run_pipeline(league_id, years, espn_s2, swid, output_path=None, sqlite_path=
     for year in years:
         print(f"Fetching {year} season...")
         raw = fetch_league_json(league_id, year, espn_s2, swid)
+        league_name = raw.get("settings", {}).get("name")
         team_manager, team_name = build_manager_map(raw)
         weekly_by_manager_df, schedule_df, matchup_points_df, matchup_records = build_dataframes(
             raw, year, team_manager, team_name
@@ -359,6 +360,7 @@ def run_pipeline(league_id, years, espn_s2, swid, output_path=None, sqlite_path=
 
         if conn is not None:
             db_module.load_season(conn, year, team_manager, team_name, player_rows, matchup_records)
+            db_module.set_league_info(conn, year, league_id, league_name)
             print(f"  Loaded {year} into {sqlite_path}")
 
             windows = (contests_config or {}).get(year) or (contests_config or {}).get(str(year))

@@ -39,6 +39,8 @@ weekly_manager_points   VIEW: sums `weekly_player_points` per (season, week,
                         games during playoff weeks), which would silently
                         drop that team for that week. See the comment above
                         the view's SQL for details.
+leagues                 one row per season -- ESPN's league display name
+                        (e.g. for the "<league name> Grand Prix" page title).
 contest_windows         one row per side-contest window (e.g. weeks 1-4,
                         5-8, 9-12, 13-17) for a season. Not hardcoded --
                         windows vary by season/commissioner, so they're
@@ -121,6 +123,12 @@ CREATE VIEW weekly_manager_points AS
     SELECT season, week, team_id, ROUND(SUM(points), 2) AS points
     FROM weekly_player_points
     GROUP BY season, week, team_id;
+
+CREATE TABLE IF NOT EXISTS leagues (
+    season INTEGER PRIMARY KEY,
+    espn_league_id INTEGER NOT NULL,
+    league_name TEXT
+);
 
 CREATE TABLE IF NOT EXISTS contest_windows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -226,6 +234,18 @@ def get_or_create_player(conn, espn_player_id, name, position):
         (name, position),
     ).fetchone()
     return row[0]
+
+
+def set_league_info(conn, season, espn_league_id, league_name):
+    conn.execute(
+        """INSERT INTO leagues (season, espn_league_id, league_name)
+           VALUES (?, ?, ?)
+           ON CONFLICT(season) DO UPDATE SET
+                espn_league_id = excluded.espn_league_id,
+                league_name = excluded.league_name""",
+        (season, espn_league_id, league_name),
+    )
+    conn.commit()
 
 
 def set_contest_windows(conn, season, windows):

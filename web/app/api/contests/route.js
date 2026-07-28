@@ -30,6 +30,9 @@ export async function GET(request) {
     return Response.json({ error: "season query param is required" }, { status: 400 });
   }
 
+  const leagueRows = await query("SELECT league_name FROM leagues WHERE season = ?", [season]).catch(() => []);
+  const leagueName = leagueRows[0]?.league_name ?? null;
+
   const windows = await query(
     `SELECT id AS contest_id, contest_name AS name, start_week, end_week, sort_order
      FROM contest_windows WHERE season = ? ORDER BY sort_order`,
@@ -65,14 +68,21 @@ export async function GET(request) {
   }
 
   const contests = windows.map((w) => {
+    const contestWeeks = [];
+    for (let wk = w.start_week; wk <= w.end_week; wk++) contestWeeks.push(wk);
+
     const inWindow = ranked.filter((r) => r.week >= w.start_week && r.week <= w.end_week);
 
-    const totals = new Map(); // manager -> { contest_points, fantasy_points }
+    // manager -> { contest_points, fantasy_points, byWeek: { week: placement_points } }
+    const totals = new Map();
     for (const r of inWindow) {
-      if (!totals.has(r.manager)) totals.set(r.manager, { contest_points: 0, fantasy_points: 0 });
+      if (!totals.has(r.manager)) {
+        totals.set(r.manager, { contest_points: 0, fantasy_points: 0, byWeek: {} });
+      }
       const t = totals.get(r.manager);
       t.contest_points += r.placement_points;
       t.fantasy_points += r.points;
+      t.byWeek[r.week] = r.placement_points;
     }
 
     const leaderboard = [...totals.entries()]
@@ -80,6 +90,7 @@ export async function GET(request) {
         manager,
         contest_points: t.contest_points,
         fantasy_points: Number(t.fantasy_points.toFixed(2)),
+        weekly_points: contestWeeks.map((wk) => t.byWeek[wk] ?? null),
       }))
       // Sort by contest (placement) points, not fantasy points. Fantasy
       // points only break ties.
@@ -90,10 +101,11 @@ export async function GET(request) {
       name: w.name,
       start_week: w.start_week,
       end_week: w.end_week,
+      weeks: contestWeeks,
       status: maxWeek >= w.end_week ? "final" : maxWeek >= w.start_week ? "in_progress" : "upcoming",
       leaderboard,
     };
   });
 
-  return Response.json({ season, maxWeek, contests });
+  return Response.json({ season, maxWeek, leagueName, contests });
 }

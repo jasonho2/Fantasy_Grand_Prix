@@ -42,12 +42,18 @@ function StandingsInner() {
 
   const { data, loading, error } = useJson(activeSeason ? `/api/standings?season=${activeSeason}` : null);
 
-  const [sortKey, setSortKey] = useState("wins");
+  // null = default sort (best win-loss record, points_for as tiebreaker).
+  // Clicking a column header switches to sorting by that column alone.
+  const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState("desc");
 
   const sortedStandings = useMemo(() => {
     if (!data?.standings) return [];
     const rows = [...data.standings];
+    if (sortKey === null) {
+      rows.sort((a, b) => b.wins - a.wins || a.losses - b.losses || b.points_for - a.points_for);
+      return rows;
+    }
     rows.sort((a, b) => {
       const dir = sortDir === "desc" ? -1 : 1;
       return a[sortKey] > b[sortKey] ? dir * -1 : a[sortKey] < b[sortKey] ? dir : 0;
@@ -81,7 +87,7 @@ function StandingsInner() {
       {data && (
         <>
           <div className="panel">
-            <h2>Standings</h2>
+            <h2>Season Leaderboard</h2>
             <table>
               <thead>
                 <tr>
