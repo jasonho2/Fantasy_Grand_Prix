@@ -195,10 +195,10 @@ function PlayersInner() {
               {managerFilter !== "All" || positionFilter !== "All" || playerSearch ? " (filtered)" : ""}
             </h2>
             {chartRows.length > 0 ? (
-              <ResponsiveContainer width="100%" height={460}>
-                <BarChart data={chartRows} margin={{ top: 24, right: 16, left: 16, bottom: 20 }}>
+              <ResponsiveContainer width="100%" height={560}>
+                <BarChart data={chartRows} margin={{ top: 24, right: 20, left: 150, bottom: 10 }}>
                   <CartesianGrid stroke="#2a2e37" />
-                  <XAxis dataKey="manager" stroke="#9aa1ad" angle={-20} textAnchor="end" height={90} />
+                  <XAxis dataKey="manager" stroke="#9aa1ad" angle={-20} textAnchor="end" height={130} />
                   <YAxis stroke="#9aa1ad" />
                   <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
                   <Legend />
