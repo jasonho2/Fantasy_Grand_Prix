@@ -76,10 +76,10 @@ function TotalLabel(props) {
 function ManagerTick({ x, y, payload }) {
   const raw = payload.value;
   const lines = raw.includes("/") ? raw.split("/").map((s) => s.trim()) : [raw];
-  const lineHeight = 13;
+  const lineHeight = 15;
   const firstDy = -((lines.length - 1) * lineHeight) / 2;
   return (
-    <text x={x} y={y} textAnchor="end" fill="#9aa1ad" fontSize={12}>
+    <text x={x} y={y} textAnchor="end" fill="#9aa1ad" fontSize={13} dominantBaseline="central">
       {lines.map((line, i) => (
         <tspan key={i} x={x} dy={i === 0 ? firstDy : lineHeight}>
           {line}
@@ -93,7 +93,7 @@ function ManagerTick({ x, y, payload }) {
 // actually be rendered (post-wrap), instead of a fixed value sized for
 // the single longest full name.
 function estimateYAxisWidth(chartRows) {
-  const CHAR_PX = 7; // rough average glyph width at 12px tick font
+  const CHAR_PX = 7.5; // rough average glyph width at the 13px tick font
   const PADDING = 24; // tick-to-axis-line gap + a little breathing room
   const MIN_WIDTH = 70;
   const MAX_WIDTH = 220;
