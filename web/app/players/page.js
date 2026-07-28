@@ -26,6 +26,12 @@ const POSITION_COLORS = {
 };
 const FALLBACK_COLOR = "#9aa1ad";
 
+// Track width the slider line/fill are drawn at, plus the thumb radius
+// reserved as padding on each side so a thumb centered at either extreme
+// stays fully inside the slider's bounding box instead of poking past it.
+const SLIDER_TRACK_WIDTH = 240;
+const SLIDER_THUMB_RADIUS = 7;
+
 function aggregateByManagerPosition(rows) {
   const managers = [...new Set(rows.map((r) => r.manager))].sort();
   const positions = [...new Set(rows.map((r) => r.position))].sort();
@@ -118,12 +124,16 @@ function PlayersInner() {
   const isFullRange = rangeMin === seasonMinWeek && rangeMax === seasonMaxWeek;
 
   function handleMinChange(value) {
-    const next = Math.min(Number(value), rangeMax);
+    const num = Number(value);
+    if (Number.isNaN(num)) return;
+    const next = Math.max(seasonMinWeek, Math.min(num, rangeMax));
     setWeekRange([next, rangeMax]);
   }
 
   function handleMaxChange(value) {
-    const next = Math.max(Number(value), rangeMin);
+    const num = Number(value);
+    if (Number.isNaN(num)) return;
+    const next = Math.min(seasonMaxWeek, Math.max(num, rangeMin));
     setWeekRange([rangeMin, next]);
   }
 
@@ -152,7 +162,7 @@ function PlayersInner() {
     const agg = aggregateByPlayer(filteredRows);
     agg.sort((a, b) => {
       const dir = sortDir === "desc" ? -1 : 1;
-      return a[sortKey] > b[sortKey] ? dir * -1 : a[sortKey] < b[sortKey] ? dir : 0;
+      return a[sortKey] > b[sortKey] ? dir : a[sortKey] < b[sortKey] ? -dir : 0;
     });
     return agg;
   }, [filteredRows, sortKey, sortDir]);
@@ -185,10 +195,10 @@ function PlayersInner() {
               {managerFilter !== "All" || positionFilter !== "All" || playerSearch ? " (filtered)" : ""}
             </h2>
             {chartRows.length > 0 ? (
-              <ResponsiveContainer width="100%" height={440}>
-                <BarChart data={chartRows} margin={{ top: 24, right: 0, left: 0, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={460}>
+                <BarChart data={chartRows} margin={{ top: 24, right: 16, left: 16, bottom: 20 }}>
                   <CartesianGrid stroke="#2a2e37" />
-                  <XAxis dataKey="manager" stroke="#9aa1ad" angle={-20} textAnchor="end" height={70} />
+                  <XAxis dataKey="manager" stroke="#9aa1ad" angle={-20} textAnchor="end" height={90} />
                   <YAxis stroke="#9aa1ad" />
                   <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
                   <Legend />
@@ -225,13 +235,32 @@ function PlayersInner() {
             />
           </div>
           <div className="controls" style={{ marginTop: -12, alignItems: "center" }}>
-            <span style={{ fontSize: 14, color: "var(--text-dim)", minWidth: 110 }}>{weeksLabel}</span>
+            <span style={{ fontSize: 14, color: "var(--text-dim)" }}>{weeksLabel}</span>
+            <input
+              type="number"
+              className="week-number-input"
+              min={seasonMinWeek}
+              max={seasonMaxWeek}
+              value={rangeMin}
+              onChange={(e) => handleMinChange(e.target.value)}
+              aria-label="Minimum week (type a number)"
+            />
+            <span style={{ color: "var(--text-dim)" }}>to</span>
+            <input
+              type="number"
+              className="week-number-input"
+              min={seasonMinWeek}
+              max={seasonMaxWeek}
+              value={rangeMax}
+              onChange={(e) => handleMaxChange(e.target.value)}
+              aria-label="Maximum week (type a number)"
+            />
             <div className="range-slider">
               <div
                 className="range-slider-track-fill"
                 style={{
-                  left: `${((rangeMin - seasonMinWeek) / (seasonMaxWeek - seasonMinWeek || 1)) * 100}%`,
-                  right: `${100 - ((rangeMax - seasonMinWeek) / (seasonMaxWeek - seasonMinWeek || 1)) * 100}%`,
+                  left: `${SLIDER_THUMB_RADIUS + ((rangeMin - seasonMinWeek) / (seasonMaxWeek - seasonMinWeek || 1)) * SLIDER_TRACK_WIDTH}px`,
+                  right: `${SLIDER_THUMB_RADIUS + (1 - (rangeMax - seasonMinWeek) / (seasonMaxWeek - seasonMinWeek || 1)) * SLIDER_TRACK_WIDTH}px`,
                 }}
               />
               <input

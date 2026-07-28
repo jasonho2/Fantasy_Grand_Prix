@@ -85,10 +85,17 @@ nav.topnav a.active {
 /* Dual-handle range slider, built from two overlapping native <input
    type="range"> elements. Each one has a transparent track and only its
    thumb is interactive (pointer-events re-enabled on the thumb pseudo
-   -element), so the two thumbs can be dragged independently. */
+   -element), so the two thumbs can be dragged independently.
+
+   The container is 14px wider than the 240px track/line (7px on each
+   side -- half the 14px thumb diameter) so a thumb centered at the very
+   min or max value stays fully inside the component instead of poking
+   out past the drawn line. The inputs are inset by that same 7px and
+   sized to the 240px track so their native value-to-pixel mapping lines
+   up exactly with the visible line and fill. */
 .range-slider {
   position: relative;
-  width: 240px;
+  width: 254px;
   height: 24px;
 }
 
@@ -96,8 +103,8 @@ nav.topnav a.active {
   content: "";
   position: absolute;
   top: 11px;
-  left: 0;
-  right: 0;
+  left: 7px;
+  right: 7px;
   height: 2px;
   background: var(--border);
   border-radius: 2px;
@@ -114,8 +121,9 @@ nav.topnav a.active {
 .range-slider input[type="range"] {
   position: absolute;
   top: 0;
-  left: 0;
-  width: 100%;
+  left: 7px;
+  width: calc(100% - 14px);
+  height: 24px;
   margin: 0;
   background: transparent;
   pointer-events: none;
@@ -164,6 +172,17 @@ select, input[type="text"] {
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 14px;
+}
+
+.week-number-input {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 13px;
+  width: 48px;
+  text-align: center;
 }
 
 .panel {

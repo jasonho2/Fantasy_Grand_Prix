@@ -56,7 +56,7 @@ function StandingsInner() {
     }
     rows.sort((a, b) => {
       const dir = sortDir === "desc" ? -1 : 1;
-      return a[sortKey] > b[sortKey] ? dir * -1 : a[sortKey] < b[sortKey] ? dir : 0;
+      return a[sortKey] > b[sortKey] ? dir : a[sortKey] < b[sortKey] ? -dir : 0;
     });
     return rows;
   }, [data, sortKey, sortDir]);
