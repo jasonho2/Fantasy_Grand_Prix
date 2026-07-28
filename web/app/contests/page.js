@@ -93,13 +93,13 @@ function ContestPanel({ contest }) {
         <table className="contests-table">
           <thead>
             <tr>
-              <th className="sticky-col">Rank</th>
+              <th className="sticky-col th-vertical">Rank</th>
               <th className="sticky-col">Manager</th>
               {contest.weeks.map((wk) => (
                 <th key={wk}>Wk {wk}</th>
               ))}
-              <th>Total</th>
-              <th>Fantasy Points (ref)</th>
+              <th className="th-vertical">Total</th>
+              <th title="Fantasy Points (ref)">PF</th>
             </tr>
           </thead>
           <tbody>

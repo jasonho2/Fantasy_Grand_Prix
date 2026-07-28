@@ -76,10 +76,10 @@ function TotalLabel(props) {
 function ManagerTick({ x, y, payload }) {
   const raw = payload.value;
   const lines = raw.includes("/") ? raw.split("/").map((s) => s.trim()) : [raw];
-  const lineHeight = 15;
+  const lineHeight = 13;
   const firstDy = -((lines.length - 1) * lineHeight) / 2;
   return (
-    <text x={x} y={y} textAnchor="end" fill="#9aa1ad" fontSize={13} dominantBaseline="central">
+    <text x={x} y={y} textAnchor="end" fill="#9aa1ad" fontSize={11} dominantBaseline="central">
       {lines.map((line, i) => (
         <tspan key={i} x={x} dy={i === 0 ? firstDy : lineHeight}>
           {line}
@@ -93,10 +93,10 @@ function ManagerTick({ x, y, payload }) {
 // actually be rendered (post-wrap), instead of a fixed value sized for
 // the single longest full name.
 function estimateYAxisWidth(chartRows) {
-  const CHAR_PX = 7.5; // rough average glyph width at the 13px tick font
-  const PADDING = 24; // tick-to-axis-line gap + a little breathing room
-  const MIN_WIDTH = 70;
-  const MAX_WIDTH = 220;
+  const CHAR_PX = 6.3; // rough average glyph width at the 11px tick font
+  const PADDING = 16; // tick-to-axis-line gap + a little breathing room
+  const MIN_WIDTH = 55;
+  const MAX_WIDTH = 190;
   let maxChars = 0;
   for (const row of chartRows) {
     const lines = row.manager.includes("/") ? row.manager.split("/").map((s) => s.trim()) : [row.manager];
@@ -255,7 +255,7 @@ function PlayersInner() {
                 <BarChart
                   data={chartRows}
                   layout="vertical"
-                  margin={{ top: 24, right: 60, left: 4, bottom: 10 }}
+                  margin={{ top: 24, right: 60, left: 0, bottom: 10 }}
                 >
                   <CartesianGrid stroke="#2a2e37" horizontal={false} />
                   <XAxis type="number" stroke="#9aa1ad" />
@@ -364,11 +364,11 @@ function PlayersInner() {
                 <thead>
                   <tr>
                     <th className="sticky-col" onClick={() => toggleSort("player")}>Player</th>
-                    <th className="sticky-col" onClick={() => toggleSort("position")}>Position</th>
+                    <th className="sticky-col th-vertical" onClick={() => toggleSort("position")}>Position</th>
                     <th className="sticky-col" onClick={() => toggleSort("manager")}>Manager</th>
-                    <th onClick={() => toggleSort("total")}>Total Points</th>
-                    <th onClick={() => toggleSort("weeks")}>Weeks Started</th>
-                    <th onClick={() => toggleSort("avg")}>Avg / Week</th>
+                    <th title="Total Points" onClick={() => toggleSort("total")}>PF</th>
+                    <th className="th-vertical" title="Weeks Started" onClick={() => toggleSort("weeks")}>Wks Started</th>
+                    <th title="Avg / Week" onClick={() => toggleSort("avg")}>Avg / Wk</th>
                   </tr>
                 </thead>
                 <tbody>
