@@ -30,9 +30,15 @@ players                 one row per NFL player (deduped by ESPN player id when a
 weekly_player_points    one row per starting-lineup player per week
 matchups                one row per matchup per week (home vs away, with both scores)
 
-weekly_manager_points   VIEW: unions the home/away sides of `matchups` into
-                        one row per (season, week, team_id, points) -- the
-                        manager's weekly total, so it isn't stored twice.
+weekly_manager_points   VIEW: sums `weekly_player_points` per (season, week,
+                        team_id) to get the manager's weekly total, so it
+                        isn't stored twice. Deliberately NOT derived from
+                        matchups.home_points/away_points -- ESPN's
+                        season-level schedule can be missing a matchup entry
+                        for a given week (seen with consolation-bracket
+                        games during playoff weeks), which would silently
+                        drop that team for that week. See the comment above
+                        the view's SQL for details.
 contest_windows         one row per side-contest window (e.g. weeks 1-4,
                         5-8, 9-12, 13-17) for a season. Not hardcoded --
                         windows vary by season/commissioner, so they're
@@ -101,11 +107,20 @@ CREATE TABLE IF NOT EXISTS matchups (
 );
 CREATE INDEX IF NOT EXISTS idx_matchups_season_week ON matchups(season, week);
 
-CREATE VIEW IF NOT EXISTS weekly_manager_points AS
-    SELECT season, week, home_team_id AS team_id, home_points AS points FROM matchups
-    UNION ALL
-    SELECT season, week, away_team_id AS team_id, away_points AS points
-    FROM matchups WHERE away_team_id IS NOT NULL;
+-- Derived from weekly_player_points (sum of that team's starters), NOT from
+-- matchups.home_points/away_points. Discovered via real league data: ESPN's
+-- season-level schedule can be missing a matchup entry for a given week
+-- (seen with consolation-bracket games during playoff weeks), which would
+-- silently drop that team from this view for that week if it were built
+-- from matchups instead. weekly_player_points is populated from each team's
+-- boxscore directly and stays complete even when that happens, so every
+-- team appears every week it fielded a lineup, regardless of whether ESPN's
+-- schedule listing shows a matchup for it.
+DROP VIEW IF EXISTS weekly_manager_points;
+CREATE VIEW weekly_manager_points AS
+    SELECT season, week, team_id, ROUND(SUM(points), 2) AS points
+    FROM weekly_player_points
+    GROUP BY season, week, team_id;
 
 CREATE TABLE IF NOT EXISTS contest_windows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
