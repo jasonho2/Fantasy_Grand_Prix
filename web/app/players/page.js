@@ -46,14 +46,23 @@ function aggregateByManagerPosition(rows) {
   return { chartRows, positions };
 }
 
-// Renders the manager's season total above the top segment of their
-// stacked bar (rather than that segment's own value).
+// [HORIZONTAL BAR PREVIEW] Renders the manager's season total just past
+// the end (right side) of their stacked horizontal bar, vertically
+// centered on the bar, rather than that segment's own value.
 function TotalLabel(props) {
-  const { x, y, width, value, index, data } = props;
+  const { x, y, width, height, value, index, data } = props;
   if (value == null || !data?.[index]) return null;
   const total = data[index].total;
   return (
-    <text x={x + width / 2} y={y - 8} textAnchor="middle" fill="var(--text)" fontSize={12} fontWeight={600}>
+    <text
+      x={x + width + 8}
+      y={y + height / 2}
+      dy={4}
+      textAnchor="start"
+      fill="var(--text)"
+      fontSize={12}
+      fontWeight={600}
+    >
       {total}
     </text>
   );
@@ -195,11 +204,20 @@ function PlayersInner() {
               {managerFilter !== "All" || positionFilter !== "All" || playerSearch ? " (filtered)" : ""}
             </h2>
             {chartRows.length > 0 ? (
-              <ResponsiveContainer width="100%" height={560}>
-                <BarChart data={chartRows} margin={{ top: 24, right: 20, left: 150, bottom: 10 }}>
-                  <CartesianGrid stroke="#2a2e37" />
-                  <XAxis dataKey="manager" stroke="#9aa1ad" angle={-20} textAnchor="end" height={130} />
-                  <YAxis stroke="#9aa1ad" />
+              // [HORIZONTAL BAR PREVIEW] layout="vertical" makes Recharts draw
+              // horizontal bars: the category (manager) moves to the YAxis and
+              // the value axis becomes the XAxis. This lets manager names
+              // render fully horizontal instead of rotated, so long names
+              // never need to be clipped or projected past a margin.
+              <ResponsiveContainer width="100%" height={Math.max(320, chartRows.length * 42 + 80)}>
+                <BarChart
+                  data={chartRows}
+                  layout="vertical"
+                  margin={{ top: 24, right: 60, left: 10, bottom: 10 }}
+                >
+                  <CartesianGrid stroke="#2a2e37" horizontal={false} />
+                  <XAxis type="number" stroke="#9aa1ad" />
+                  <YAxis dataKey="manager" type="category" stroke="#9aa1ad" width={220} />
                   <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
                   <Legend />
                   {chartPositions.map((pos, i) => (
