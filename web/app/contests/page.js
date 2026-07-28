@@ -93,19 +93,19 @@ function ContestPanel({ contest }) {
         <table className="contests-table">
           <thead>
             <tr>
-              <th className="sticky-col th-vertical">Rank</th>
+              <th>Rank</th>
               <th className="sticky-col">Team</th>
               {contest.weeks.map((wk) => (
                 <th key={wk}>Wk {wk}</th>
               ))}
-              <th className="th-vertical">Total</th>
+              <th>Total</th>
               <th title="Fantasy Points (ref)">PF</th>
             </tr>
           </thead>
           <tbody>
             {sortedLeaderboard.map((row) => (
               <tr key={row.team} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
-                <td className="sticky-col">{row.displayRank}</td>
+                <td>{row.displayRank}</td>
                 <td className="sticky-col">
                   <span className="truncate-cell" style={{ display: "inline-block", verticalAlign: "middle" }} title={row.team}>
                     {row.team}

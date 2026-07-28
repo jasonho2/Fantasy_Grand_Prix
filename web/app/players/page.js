@@ -68,14 +68,31 @@ function TotalLabel(props) {
   );
 }
 
-// Some team names include a "/" (e.g. co-managed rosters keeping both
-// owners' names in the team name). A "/" is the wrap signal: split
-// there and stack the pieces on their own lines so the label stays
-// compact instead of forcing extra Y-axis width for the combined
-// length. Names without a "/" render on a single line.
+const Y_AXIS_MAX_FIRST_LINE = 20;
+
+// Word-wraps a team name to at most 2 lines: line 1 fills up with whole
+// words up to `maxFirstLine` characters (never splitting a word, so a
+// single overlong word can still exceed it -- there's no way to break it
+// without hyphenating), and everything left over becomes line 2 as-is.
+function wrapTeamName(name, maxFirstLine = Y_AXIS_MAX_FIRST_LINE) {
+  const words = name.split(" ");
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (lines.length === 0 && current && candidate.length > maxFirstLine) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.slice(0, 2);
+}
+
 function TeamTick({ x, y, payload }) {
-  const raw = payload.value;
-  const lines = raw.includes("/") ? raw.split("/").map((s) => s.trim()) : [raw];
+  const lines = wrapTeamName(payload.value);
   const lineHeight = 13;
   const firstDy = -((lines.length - 1) * lineHeight) / 2;
   return (
@@ -94,13 +111,12 @@ function TeamTick({ x, y, payload }) {
 // the single longest full name.
 function estimateYAxisWidth(chartRows) {
   const CHAR_PX = 6.3; // rough average glyph width at the 11px tick font
-  const PADDING = 10; // tick-to-axis-line gap + a little breathing room
-  const MIN_WIDTH = 50;
-  const MAX_WIDTH = 190;
+  const PADDING = 6; // tick-to-axis-line gap + a little breathing room
+  const MIN_WIDTH = 46;
+  const MAX_WIDTH = 140;
   let maxChars = 0;
   for (const row of chartRows) {
-    const lines = row.team.includes("/") ? row.team.split("/").map((s) => s.trim()) : [row.team];
-    for (const line of lines) {
+    for (const line of wrapTeamName(row.team)) {
       if (line.length > maxChars) maxChars = line.length;
     }
   }
@@ -255,7 +271,7 @@ function PlayersInner() {
                 <BarChart
                   data={chartRows}
                   layout="vertical"
-                  margin={{ top: 24, right: 60, left: 0, bottom: 10 }}
+                  margin={{ top: 24, right: 50, left: 0, bottom: 10 }}
                 >
                   <CartesianGrid stroke="#2a2e37" horizontal={false} />
                   <XAxis type="number" stroke="#9aa1ad" />
@@ -366,10 +382,10 @@ function PlayersInner() {
                 <thead>
                   <tr>
                     <th className="sticky-col" onClick={() => toggleSort("player")}>Player</th>
-                    <th className="sticky-col th-vertical" onClick={() => toggleSort("position")}>Position</th>
-                    <th className="sticky-col" onClick={() => toggleSort("team")}>Team</th>
+                    <th onClick={() => toggleSort("position")}>Slot</th>
+                    <th onClick={() => toggleSort("team")}>Team</th>
                     <th title="Total Points" onClick={() => toggleSort("total")}>PF</th>
-                    <th className="th-vertical" title="Weeks Started" onClick={() => toggleSort("weeks")}>Wks Started</th>
+                    <th title="Weeks Started" onClick={() => toggleSort("weeks")}>Wks Started</th>
                     <th title="Avg / Week" onClick={() => toggleSort("avg")}>Avg / Wk</th>
                   </tr>
                 </thead>
@@ -377,8 +393,8 @@ function PlayersInner() {
                   {playerTotals.map((row) => (
                     <tr key={`${row.player}-${row.position}-${row.team}`}>
                       <td className="sticky-col truncate-cell" title={row.player}>{row.player}</td>
-                      <td className="sticky-col">{row.position}</td>
-                      <td className="sticky-col truncate-cell" title={row.team}>{row.team}</td>
+                      <td>{row.position}</td>
+                      <td>{row.team}</td>
                       <td>{row.total}</td>
                       <td>{row.weeks}</td>
                       <td>{row.avg}</td>

@@ -255,18 +255,6 @@ nav.topnav a.active {
     left: 0;
     width: 108px;
     max-width: 108px;
-  }
-  .players-table th:nth-child(2).sticky-col,
-  .players-table td:nth-child(2).sticky-col {
-    left: 108px;
-    width: 46px;
-    max-width: 46px;
-  }
-  .players-table th:nth-child(3).sticky-col,
-  .players-table td:nth-child(3).sticky-col {
-    left: 154px;
-    width: 108px;
-    max-width: 108px;
     box-shadow: 3px 0 6px -2px rgba(0, 0, 0, 0.5);
   }
 
@@ -276,21 +264,15 @@ nav.topnav a.active {
     padding-right: 3px;
   }
 
-  .contests-table th:nth-child(1).sticky-col,
-  .contests-table td:nth-child(1).sticky-col {
-    left: 0;
-    width: 22px;
-    max-width: 22px;
-  }
   .contests-table th:nth-child(2).sticky-col,
   .contests-table td:nth-child(2).sticky-col {
-    left: 22px;
+    left: 0;
     width: 140px;
     max-width: 140px;
     box-shadow: 3px 0 6px -2px rgba(0, 0, 0, 0.5);
   }
   .contests-table td:nth-child(2).sticky-col .truncate-cell {
-    max-width: 78px;
+    max-width: 96px;
   }
 }
 
