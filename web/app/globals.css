@@ -1,0 +1,137 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --border: #2a2e37;
+  --text: #e7e9ee;
+  --text-dim: #9aa1ad;
+  --accent: #5b9dff;
+  --win: #3ecf8e;
+  --loss: #ff6b6b;
+  --tie: #d9b64e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+nav.topnav {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+nav.topnav .brand {
+  font-weight: 700;
+  margin-right: auto;
+}
+
+nav.topnav a {
+  text-decoration: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  padding: 6px 2px;
+  border-bottom: 2px solid transparent;
+}
+
+nav.topnav a.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+select, input[type="text"] {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 15px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  color: var(--text-dim);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge.win { background: rgba(62, 207, 142, 0.15); color: var(--win); }
+.badge.loss { background: rgba(255, 107, 107, 0.15); color: var(--loss); }
+.badge.tie { background: rgba(217, 182, 78, 0.15); color: var(--tie); }
+.badge.bye { background: rgba(154, 161, 173, 0.15); color: var(--text-dim); }
+
+.empty-state, .loading-state, .error-state {
+  color: var(--text-dim);
+  padding: 40px 0;
+  text-align: center;
+}
+
+.error-state {
+  color: var(--loss);
+}
