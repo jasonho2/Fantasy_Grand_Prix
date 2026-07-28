@@ -1,0 +1,27 @@
+# Secrets -- never commit real ESPN cookies or DB credentials
+config.json
+.env
+.env.local
+.env*.local
+
+# Data files (regenerate via the pipeline; don't bloat the repo/expose league data by default)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.xlsx
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node / Next.js
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel/
+
+# OS cruft
+.DS_Store
