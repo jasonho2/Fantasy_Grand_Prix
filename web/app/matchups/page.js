@@ -128,49 +128,51 @@ function MatchupsInner() {
             {weeks.map(([week, weekRows]) => (
               <div key={week} style={{ marginBottom: 24 }}>
                 <h3 style={{ fontSize: 14, color: "var(--text-dim)", margin: "0 0 8px" }}>Week {week}</h3>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Home</th>
-                      <th>Score</th>
-                      <th>Away</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {weekRows.map((row, i) => {
-                      const homeWon = !row.is_bye && row.winner === "HOME";
-                      const awayWon = !row.is_bye && row.winner === "AWAY";
-                      const isTie = !row.is_bye && row.winner === "TIE";
-                      const homeRec = formatRecord(records.get(`${row.home_manager}|${row.week}`));
-                      const awayRec = row.away_manager
-                        ? formatRecord(records.get(`${row.away_manager}|${row.week}`))
-                        : "";
-                      const winnerStyle = { color: "var(--win)", fontWeight: 700 };
-                      const tieStyle = { color: "var(--tie)" };
-                      const cellStyle = (won) => (won ? winnerStyle : isTie ? tieStyle : undefined);
-                      return (
-                        <tr key={i}>
-                          <td style={cellStyle(homeWon)}>
-                            {row.home_manager}
-                            {homeRec && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({homeRec})</span>}
-                          </td>
-                          <td>
-                            {row.home_points?.toFixed?.(1) ?? row.home_points}
-                            {!row.is_bye && row.away_points != null && ` - ${row.away_points.toFixed?.(1) ?? row.away_points}`}
-                          </td>
-                          <td style={cellStyle(awayWon)}>
-                            {row.is_bye ? (
-                              <span className="badge bye">BYE</span>
-                            ) : (
-                              row.away_manager
-                            )}
-                            {awayRec && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({awayRec})</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Home</th>
+                        <th>Score</th>
+                        <th>Away</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {weekRows.map((row, i) => {
+                        const homeWon = !row.is_bye && row.winner === "HOME";
+                        const awayWon = !row.is_bye && row.winner === "AWAY";
+                        const isTie = !row.is_bye && row.winner === "TIE";
+                        const homeRec = formatRecord(records.get(`${row.home_manager}|${row.week}`));
+                        const awayRec = row.away_manager
+                          ? formatRecord(records.get(`${row.away_manager}|${row.week}`))
+                          : "";
+                        const winnerStyle = { color: "var(--win)", fontWeight: 700 };
+                        const tieStyle = { color: "var(--tie)" };
+                        const cellStyle = (won) => (won ? winnerStyle : isTie ? tieStyle : undefined);
+                        return (
+                          <tr key={i}>
+                            <td style={cellStyle(homeWon)}>
+                              {row.home_manager}
+                              {homeRec && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({homeRec})</span>}
+                            </td>
+                            <td>
+                              {row.home_points?.toFixed?.(1) ?? row.home_points}
+                              {!row.is_bye && row.away_points != null && ` - ${row.away_points.toFixed?.(1) ?? row.away_points}`}
+                            </td>
+                            <td style={cellStyle(awayWon)}>
+                              {row.is_bye ? (
+                                <span className="badge bye">BYE</span>
+                              ) : (
+                                row.away_manager
+                              )}
+                              {awayRec && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}> ({awayRec})</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ))}
             {weeks.length === 0 && <div className="empty-state">No games yet.</div>}
@@ -178,32 +180,34 @@ function MatchupsInner() {
 
           <div className="panel">
             <h2>Head-to-Head Records</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Manager</th>
-                  <th>Manager</th>
-                  <th>Record</th>
-                </tr>
-              </thead>
-              <tbody>
-                {h2h.map((row) => (
-                  <tr key={`${row.a}-${row.b}`}>
-                    <td>{row.a}</td>
-                    <td>{row.b}</td>
-                    <td>
-                      {row.aWins}-{row.bWins}
-                      {row.ties > 0 ? `-${row.ties}` : ""}
-                      {row.aWins !== row.bWins && (
-                        <span style={{ color: "var(--text-dim)", marginLeft: 8 }}>
-                          ({row.aWins > row.bWins ? row.a : row.b} leads)
-                        </span>
-                      )}
-                    </td>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Manager</th>
+                    <th>Manager</th>
+                    <th>Record</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {h2h.map((row) => (
+                    <tr key={`${row.a}-${row.b}`}>
+                      <td>{row.a}</td>
+                      <td>{row.b}</td>
+                      <td>
+                        {row.aWins}-{row.bWins}
+                        {row.ties > 0 ? `-${row.ties}` : ""}
+                        {row.aWins !== row.bWins && (
+                          <span style={{ color: "var(--text-dim)", marginLeft: 8 }}>
+                            ({row.aWins > row.bWins ? row.a : row.b} leads)
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {h2h.length === 0 && <div className="empty-state">No head-to-head games yet.</div>}
           </div>
         </>

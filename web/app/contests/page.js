@@ -89,41 +89,43 @@ function ContestPanel({ contest }) {
         </button>
       </div>
 
-      <table className="contests-table">
-        <thead>
-          <tr>
-            <th className="sticky-col">Rank</th>
-            <th className="sticky-col">Manager</th>
-            {contest.weeks.map((wk) => (
-              <th key={wk}>Wk {wk}</th>
-            ))}
-            <th>Total</th>
-            <th>Fantasy Points (ref)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sortedLeaderboard.map((row) => (
-            <tr key={row.manager} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
-              <td className="sticky-col">{row.displayRank}</td>
-              <td className="sticky-col">
-                <span className="truncate-cell" style={{ display: "inline-block", verticalAlign: "middle" }} title={row.manager}>
-                  {row.manager}
-                </span>
-                {row.displayRank === 1 && (
-                  <span className="badge win" style={{ marginLeft: 6 }}>
-                    Leader
-                  </span>
-                )}
-              </td>
-              {row.weekly_points.map((pts, i) => (
-                <td key={contest.weeks[i]}>{pts ?? "—"}</td>
+      <div className="table-scroll">
+        <table className="contests-table">
+          <thead>
+            <tr>
+              <th className="sticky-col">Rank</th>
+              <th className="sticky-col">Manager</th>
+              {contest.weeks.map((wk) => (
+                <th key={wk}>Wk {wk}</th>
               ))}
-              <td style={sortBy === "contest_points" ? { fontWeight: 700 } : undefined}>{row.contest_points}</td>
-              <td style={sortBy === "fantasy_points" ? { fontWeight: 700 } : undefined}>{row.fantasy_points}</td>
+              <th>Total</th>
+              <th>Fantasy Points (ref)</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {sortedLeaderboard.map((row) => (
+              <tr key={row.manager} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
+                <td className="sticky-col">{row.displayRank}</td>
+                <td className="sticky-col">
+                  <span className="truncate-cell" style={{ display: "inline-block", verticalAlign: "middle" }} title={row.manager}>
+                    {row.manager}
+                  </span>
+                  {row.displayRank === 1 && (
+                    <span className="badge win" style={{ marginLeft: 6 }}>
+                      Leader
+                    </span>
+                  )}
+                </td>
+                {row.weekly_points.map((pts, i) => (
+                  <td key={contest.weeks[i]}>{pts ?? "—"}</td>
+                ))}
+                <td style={sortBy === "contest_points" ? { fontWeight: 700 } : undefined}>{row.contest_points}</td>
+                <td style={sortBy === "fantasy_points" ? { fontWeight: 700 } : undefined}>{row.fantasy_points}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {sortedLeaderboard.length === 0 && <div className="empty-state">No games played in this window yet.</div>}
     </div>
   );

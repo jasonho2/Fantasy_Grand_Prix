@@ -99,7 +99,7 @@ nav.topnav a.active {
 
 @media (max-width: 720px) {
   .container {
-    padding: 16px 12px 40px;
+    padding: 12px 6px 32px;
   }
 
   nav.topnav {
@@ -155,12 +155,19 @@ nav.topnav a.active {
   }
 
   .panel {
-    padding: 10px 12px;
-    overflow-x: auto;
+    padding: 8px 6px;
   }
 
   .panel h2 {
     font-size: 12px;
+    padding: 0 4px;
+  }
+
+  /* Scrolls independently of the panel, so a table's title and any
+     controls above it (e.g. Contests' Sort by buttons) stay put -- only
+     the table itself moves horizontally. */
+  .table-scroll {
+    overflow-x: auto;
   }
 
   table {
@@ -168,11 +175,18 @@ nav.topnav a.active {
   }
 
   th, td {
-    padding: 4px 6px;
+    padding: 4px 5px;
+  }
+
+  th {
+    white-space: normal;
+    word-break: break-word;
+    max-width: 90px;
   }
 
   .controls {
     gap: 6px;
+    padding: 0 4px;
   }
 
   select, input[type="text"], input[type="number"] {

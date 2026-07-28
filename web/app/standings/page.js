@@ -131,44 +131,46 @@ function StandingsInner() {
               Season Leaderboard
               {data.regularSeasonWeeks ? ` (Regular Season, Weeks 1-${data.regularSeasonWeeks})` : ""}
             </h2>
-            <table className="standings-table">
-              <thead>
-                <tr>
-                  <th className="sticky-col" onClick={() => toggleSort("manager")}>Manager</th>
-                  <th onClick={() => toggleSort("wins")}>W</th>
-                  <th onClick={() => toggleSort("losses")}>L</th>
-                  <th onClick={() => toggleSort("ties")}>T</th>
-                  <th onClick={() => toggleSort("points_for")}>Points For</th>
-                  <th onClick={() => toggleSort("points_against")}>Points Against</th>
-                  <th onClick={() => toggleSort("avg_points")}>Avg / Week</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedStandings.map((row) => (
-                  <tr
-                    key={row.manager}
-                    onClick={() => selectManager(row.manager)}
-                    style={{
-                      cursor: "pointer",
-                      background: selectedManager === row.manager ? "rgba(91,157,255,0.12)" : undefined,
-                    }}
-                  >
-                    <td
-                      className="sticky-col"
-                      style={{ background: selectedManager === row.manager ? "#1f2a3c" : undefined }}
-                    >
-                      {row.manager}
-                    </td>
-                    <td>{row.wins}</td>
-                    <td>{row.losses}</td>
-                    <td>{row.ties}</td>
-                    <td>{row.points_for}</td>
-                    <td>{row.points_against}</td>
-                    <td>{row.avg_points}</td>
+            <div className="table-scroll">
+              <table className="standings-table">
+                <thead>
+                  <tr>
+                    <th className="sticky-col" onClick={() => toggleSort("manager")}>Manager</th>
+                    <th onClick={() => toggleSort("wins")}>W</th>
+                    <th onClick={() => toggleSort("losses")}>L</th>
+                    <th onClick={() => toggleSort("ties")}>T</th>
+                    <th onClick={() => toggleSort("points_for")}>Points For</th>
+                    <th onClick={() => toggleSort("points_against")}>Points Against</th>
+                    <th onClick={() => toggleSort("avg_points")}>Avg / Week</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {sortedStandings.map((row) => (
+                    <tr
+                      key={row.manager}
+                      onClick={() => selectManager(row.manager)}
+                      style={{
+                        cursor: "pointer",
+                        background: selectedManager === row.manager ? "rgba(91,157,255,0.12)" : undefined,
+                      }}
+                    >
+                      <td
+                        className="sticky-col"
+                        style={{ background: selectedManager === row.manager ? "#1f2a3c" : undefined }}
+                      >
+                        {row.manager}
+                      </td>
+                      <td>{row.wins}</td>
+                      <td>{row.losses}</td>
+                      <td>{row.ties}</td>
+                      <td>{row.points_for}</td>
+                      <td>{row.points_against}</td>
+                      <td>{row.avg_points}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {sortedStandings.length === 0 && <div className="empty-state">No matchups played yet.</div>}
           </div>
 

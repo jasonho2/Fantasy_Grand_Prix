@@ -359,30 +359,32 @@ function PlayersInner() {
 
           <div className="panel">
             <h2>Player Totals {managerFilter !== "All" || positionFilter !== "All" || playerSearch || !isFullRange ? "(filtered)" : ""}</h2>
-            <table className="players-table">
-              <thead>
-                <tr>
-                  <th className="sticky-col" onClick={() => toggleSort("player")}>Player</th>
-                  <th className="sticky-col" onClick={() => toggleSort("position")}>Position</th>
-                  <th className="sticky-col" onClick={() => toggleSort("manager")}>Manager</th>
-                  <th onClick={() => toggleSort("total")}>Total Points</th>
-                  <th onClick={() => toggleSort("weeks")}>Weeks Started</th>
-                  <th onClick={() => toggleSort("avg")}>Avg / Week</th>
-                </tr>
-              </thead>
-              <tbody>
-                {playerTotals.map((row) => (
-                  <tr key={`${row.player}-${row.position}-${row.manager}`}>
-                    <td className="sticky-col truncate-cell" title={row.player}>{row.player}</td>
-                    <td className="sticky-col">{row.position}</td>
-                    <td className="sticky-col truncate-cell" title={row.manager}>{row.manager}</td>
-                    <td>{row.total}</td>
-                    <td>{row.weeks}</td>
-                    <td>{row.avg}</td>
+            <div className="table-scroll">
+              <table className="players-table">
+                <thead>
+                  <tr>
+                    <th className="sticky-col" onClick={() => toggleSort("player")}>Player</th>
+                    <th className="sticky-col" onClick={() => toggleSort("position")}>Position</th>
+                    <th className="sticky-col" onClick={() => toggleSort("manager")}>Manager</th>
+                    <th onClick={() => toggleSort("total")}>Total Points</th>
+                    <th onClick={() => toggleSort("weeks")}>Weeks Started</th>
+                    <th onClick={() => toggleSort("avg")}>Avg / Week</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {playerTotals.map((row) => (
+                    <tr key={`${row.player}-${row.position}-${row.manager}`}>
+                      <td className="sticky-col truncate-cell" title={row.player}>{row.player}</td>
+                      <td className="sticky-col">{row.position}</td>
+                      <td className="sticky-col truncate-cell" title={row.manager}>{row.manager}</td>
+                      <td>{row.total}</td>
+                      <td>{row.weeks}</td>
+                      <td>{row.avg}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {playerTotals.length === 0 && <div className="empty-state">No players match these filters.</div>}
           </div>
         </>
