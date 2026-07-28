@@ -180,7 +180,12 @@ nav.topnav a.active {
 
   th {
     white-space: normal;
-    word-break: break-word;
+    /* No word-break: break-word here on purpose -- every header is now a
+       short single word or a couple of words with a natural space to
+       wrap at (e.g. "Wks Started"). Allowing mid-word breaks let short
+       unbreakable headers like "Rank"/"Total"/"PF" get force-squeezed
+       into multiple lines whenever a table was under width pressure
+       from other columns, instead of the table just scrolling. */
     max-width: 90px;
   }
 
@@ -277,8 +282,8 @@ nav.topnav a.active {
   .contests-table th:nth-child(2).sticky-col,
   .contests-table td:nth-child(2).sticky-col {
     left: 0;
-    width: 140px;
-    max-width: 140px;
+    width: 96px;
+    max-width: 96px;
     padding-right: 10px;
     box-shadow: 3px 0 6px -2px rgba(0, 0, 0, 0.5);
   }
