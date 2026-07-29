@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import {
   LineChart,
   Line,
@@ -15,6 +14,7 @@ import {
 import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
 import { useJson } from "../../lib/useJson";
+import { useUrlState } from "../../lib/useUrlState";
 
 const COLORS = [
   "#5b9dff", "#3ecf8e", "#ff6b6b", "#d9b64e", "#c77dff",
@@ -34,9 +34,8 @@ function pivotWeekly(weekly) {
 }
 
 function StandingsInner() {
-  const searchParams = useSearchParams();
-  const season = searchParams.get("season");
-  const league = searchParams.get("league");
+  const [league, setLeague] = useUrlState("league");
+  const [season, setSeason] = useUrlState("season");
 
   const { data: meta } = useJson(`/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`);
   const seasons = meta?.seasons || [];
@@ -117,8 +116,12 @@ function StandingsInner() {
   return (
     <>
       <div className="controls">
-        <LeagueSelect leagues={meta?.leagues} league={activeLeague} />
-        <SeasonSelect seasons={seasons} season={activeSeason} />
+        <LeagueSelect
+          leagues={meta?.leagues}
+          league={activeLeague}
+          onChange={(next) => setLeague(next, { clear: ["season"] })}
+        />
+        <SeasonSelect seasons={seasons} season={activeSeason} onChange={setSeason} />
         {selectedTeam && (
           <span style={{ fontSize: 14, color: "var(--text-dim)" }}>
             Showing trend for <strong style={{ color: "var(--text)" }}>{selectedTeam}</strong> --{" "}

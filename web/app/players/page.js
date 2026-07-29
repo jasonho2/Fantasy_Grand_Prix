@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import {
   BarChart,
   Bar,
@@ -16,6 +15,7 @@ import {
 import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
 import { useJson } from "../../lib/useJson";
+import { useUrlState } from "../../lib/useUrlState";
 
 const POSITION_COLORS = {
   QB: "#5b9dff",
@@ -164,9 +164,8 @@ function aggregateByPlayer(rows) {
 }
 
 function PlayersInner() {
-  const searchParams = useSearchParams();
-  const season = searchParams.get("season");
-  const league = searchParams.get("league");
+  const [league, setLeague] = useUrlState("league");
+  const [season, setSeason] = useUrlState("season");
 
   const { data: meta } = useJson(`/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`);
   const seasons = meta?.seasons || [];
@@ -269,8 +268,12 @@ function PlayersInner() {
   return (
     <>
       <div className="controls">
-        <LeagueSelect leagues={meta?.leagues} league={activeLeague} />
-        <SeasonSelect seasons={seasons} season={activeSeason} />
+        <LeagueSelect
+          leagues={meta?.leagues}
+          league={activeLeague}
+          onChange={(next) => setLeague(next, { clear: ["season"] })}
+        />
+        <SeasonSelect seasons={seasons} season={activeSeason} onChange={setSeason} />
       </div>
 
       {loading && <div className="loading-state">Loading player data...</div>}

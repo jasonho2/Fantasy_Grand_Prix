@@ -1,10 +1,10 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
 import { useJson } from "../../lib/useJson";
+import { useUrlState } from "../../lib/useUrlState";
 
 // Cumulative W-L(-T) record for every team as of the end of each week,
 // computed from the FULL season's matchups regardless of any team
@@ -78,9 +78,8 @@ function headToHead(rows) {
 }
 
 function MatchupsInner() {
-  const searchParams = useSearchParams();
-  const season = searchParams.get("season");
-  const league = searchParams.get("league");
+  const [league, setLeague] = useUrlState("league");
+  const [season, setSeason] = useUrlState("season");
 
   const { data: meta } = useJson(`/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`);
   const seasons = meta?.seasons || [];
@@ -117,8 +116,12 @@ function MatchupsInner() {
   return (
     <>
       <div className="controls">
-        <LeagueSelect leagues={meta?.leagues} league={activeLeague} />
-        <SeasonSelect seasons={seasons} season={activeSeason} />
+        <LeagueSelect
+          leagues={meta?.leagues}
+          league={activeLeague}
+          onChange={(next) => setLeague(next, { clear: ["season"] })}
+        />
+        <SeasonSelect seasons={seasons} season={activeSeason} onChange={setSeason} />
         <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}>
           {teams.map((t) => (
             <option key={t} value={t}>{t === "All" ? "All Teams" : t}</option>

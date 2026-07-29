@@ -1,10 +1,10 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
 import { useJson } from "../../lib/useJson";
+import { useUrlState } from "../../lib/useUrlState";
 
 const STATUS_LABEL = {
   final: "Final",
@@ -133,9 +133,8 @@ function ContestPanel({ contest }) {
 }
 
 function ContestsInner() {
-  const searchParams = useSearchParams();
-  const season = searchParams.get("season");
-  const league = searchParams.get("league");
+  const [league, setLeague] = useUrlState("league");
+  const [season, setSeason] = useUrlState("season");
 
   const { data: meta } = useJson(`/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`);
   const seasons = meta?.seasons || [];
@@ -151,8 +150,12 @@ function ContestsInner() {
   return (
     <>
       <div className="controls">
-        <LeagueSelect leagues={meta?.leagues} league={activeLeague} />
-        <SeasonSelect seasons={seasons} season={activeSeason} />
+        <LeagueSelect
+          leagues={meta?.leagues}
+          league={activeLeague}
+          onChange={(next) => setLeague(next, { clear: ["season"] })}
+        />
+        <SeasonSelect seasons={seasons} season={activeSeason} onChange={setSeason} />
       </div>
 
       <h1 style={{ fontSize: 20, margin: "0 0 4px" }}>
