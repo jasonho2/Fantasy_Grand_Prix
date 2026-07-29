@@ -80,9 +80,9 @@ cp .env.local.example .env.local
 npm run dev
 ```
 
-`.env.local` points `DATABASE_URL` at the local `espn_ff_1083280.db` file
-from step 1, so you can see real data without setting up Turso yet. Open
-http://localhost:3000.
+`.env.local` points `DATABASE_URL` at the local `fantasy_grand_prix.db` file
+from step 1 (the `"sqlite"` path in `config.json`), so you can see real data
+without setting up Turso yet. Open http://localhost:3000.
 
 ## 3. Go live: Turso (hosted database)
 

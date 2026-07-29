@@ -422,7 +422,28 @@ def load_config(path):
     if not Path(path).exists():
         return {}
     with open(path) as f:
-        return json.load(f)
+        cfg = json.load(f)
+
+    # config.json moved to a multi-league "leagues" list shape (see
+    # pipeline.py). This script predates that and only knows the old flat
+    # league_id/years/espn_s2/swid/... keys -- fall back to the first ESPN
+    # entry in "leagues" so a standalone `python espn_pipeline.py` (e.g. for
+    # a quick local .xlsx export) still works against the current config.json
+    # without needing a second config file.
+    if "leagues" in cfg and "league_id" not in cfg:
+        espn_leagues = [l for l in cfg["leagues"] if l.get("platform") == "espn"]
+        if espn_leagues:
+            first = espn_leagues[0]
+            cfg = {
+                **cfg,
+                "league_id": first.get("espn_league_id"),
+                "espn_s2": first.get("espn_s2", ""),
+                "swid": first.get("espn_swid", ""),
+                "years": first.get("years"),
+                "regular_season_weeks": first.get("regular_season_weeks", {}),
+                "contests": first.get("contests", {}),
+            }
+    return cfg
 
 
 def main():

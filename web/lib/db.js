@@ -1,7 +1,7 @@
 import { createClient } from "@libsql/client";
 
 // One client per server process. DATABASE_URL is either:
-//   - file:../espn_ff_1083280.db          (local dev -- reads the file the
+//   - file:../fantasy_grand_prix.db        (local dev -- reads the file the
 //                                           Python pipeline writes to)
 //   - libsql://your-db.turso.io           (production -- Turso, needs
 //                                           DATABASE_AUTH_TOKEN too)
