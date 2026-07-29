@@ -17,18 +17,21 @@ function NavInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const league = searchParams.get("league");
+  const season = searchParams.get("season");
 
   const { data: meta } = useJson(`/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`);
   const grandPrixLabel = meta?.leagueName ? `${meta.leagueName} Grand Prix` : "Contests";
 
   const links = [{ href: "/contests", label: grandPrixLabel }, ...BASE_LINKS];
 
-  // Carry the selected league across page navigation (unlike season, which
-  // intentionally resets to each page's latest by default) -- otherwise
-  // picking a league on one page and clicking to another would silently
-  // snap back to the first registered league.
+  // Carry the selected league and season across page navigation, so picking
+  // either on one page doesn't silently reset when clicking to another.
   function hrefFor(href) {
-    return league ? `${href}?league=${encodeURIComponent(league)}` : href;
+    const params = new URLSearchParams();
+    if (league) params.set("league", league);
+    if (season) params.set("season", season);
+    const qs = params.toString();
+    return qs ? `${href}?${qs}` : href;
   }
 
   // Collapsed behind a hamburger button below the mobile breakpoint (see
