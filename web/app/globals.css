@@ -285,7 +285,6 @@ nav.topnav a.active {
     width: 96px;
     max-width: 96px;
     padding-right: 10px;
-    box-shadow: 3px 0 6px -2px rgba(0, 0, 0, 0.5);
   }
 
   /* Wks Started needs two lines ("Wks" / "Started") even when the table
