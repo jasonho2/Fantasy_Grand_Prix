@@ -467,6 +467,32 @@ table {
   font-size: 14px;
 }
 
+/* Matchups & Schedule renders one <table> per week rather than one
+   continuous table, so each week's Home/Score/Away columns would
+   otherwise size independently based on that week's own content --
+   fixed percentage widths (with table-layout: fixed forcing them, and
+   text wrapping instead of stretching the column) keep every week's
+   columns pinned to the same widths, so they line up vertically as you
+   scroll down the page. */
+.matchup-table {
+  table-layout: fixed;
+}
+
+.matchup-table th:nth-child(1),
+.matchup-table td:nth-child(1) {
+  width: 38%;
+}
+
+.matchup-table th:nth-child(2),
+.matchup-table td:nth-child(2) {
+  width: 24%;
+}
+
+.matchup-table th:nth-child(3),
+.matchup-table td:nth-child(3) {
+  width: 38%;
+}
+
 th, td {
   text-align: left;
   padding: 8px 10px;
