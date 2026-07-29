@@ -344,41 +344,56 @@ def run_pipeline(
         conn = db_module.connect(sqlite_path)
 
     for year in years:
-        print(f"Fetching {year} season...")
-        raw = fetch_league_json(league_id, year, espn_s2, swid)
-        league_name = raw.get("settings", {}).get("name")
-        team_manager, team_name = build_manager_map(raw)
-        weekly_by_manager_df, schedule_df, matchup_points_df, matchup_records = build_dataframes(
-            raw, year, team_manager, team_name
-        )
+        # One season failing (most commonly: a future season's league
+        # doesn't exist on ESPN's side yet, e.g. rerunning in the offseason
+        # before the commissioner has rolled the league over) shouldn't
+        # abort the whole run -- every other configured season, including
+        # ones already processed earlier in this same loop, should still
+        # get pulled/committed. This matters a lot for an unattended
+        # scheduled run (cron/GitHub Actions): one season being temporarily
+        # unavailable shouldn't stop stat corrections from landing for the
+        # seasons that ARE available.
+        try:
+            print(f"Fetching {year} season...")
+            raw = fetch_league_json(league_id, year, espn_s2, swid)
+            league_name = raw.get("settings", {}).get("name")
+            team_manager, team_name = build_manager_map(raw)
+            weekly_by_manager_df, schedule_df, matchup_points_df, matchup_records = build_dataframes(
+                raw, year, team_manager, team_name
+            )
 
-        played_weeks = sorted(schedule_df["week"].unique().tolist()) if not schedule_df.empty else []
-        print(f"  Fetching player-level boxscores for {len(played_weeks)} played week(s)...")
-        player_rows = build_player_points_rows(league_id, year, played_weeks, team_manager, team_name, espn_s2, swid)
-        player_df = player_rows_to_df(player_rows)
+            played_weeks = sorted(schedule_df["week"].unique().tolist()) if not schedule_df.empty else []
+            print(f"  Fetching player-level boxscores for {len(played_weeks)} played week(s)...")
+            player_rows = build_player_points_rows(
+                league_id, year, played_weeks, team_manager, team_name, espn_s2, swid
+            )
+            player_df = player_rows_to_df(player_rows)
 
-        per_season[year] = (player_df, weekly_by_manager_df, schedule_df, matchup_points_df)
-        all_player.append(player_df)
-        all_weekly_by_mgr.append(weekly_by_manager_df)
-        all_schedule.append(schedule_df)
-        all_matchup.append(matchup_points_df)
-        print(
-            f"  {len(player_df)} player-week rows, {len(weekly_by_manager_df)} weekly-by-manager rows, "
-            f"{len(schedule_df)} schedule rows, {len(matchup_points_df)} matchup rows"
-        )
+            per_season[year] = (player_df, weekly_by_manager_df, schedule_df, matchup_points_df)
+            all_player.append(player_df)
+            all_weekly_by_mgr.append(weekly_by_manager_df)
+            all_schedule.append(schedule_df)
+            all_matchup.append(matchup_points_df)
+            print(
+                f"  {len(player_df)} player-week rows, {len(weekly_by_manager_df)} weekly-by-manager rows, "
+                f"{len(schedule_df)} schedule rows, {len(matchup_points_df)} matchup rows"
+            )
 
-        if conn is not None:
-            db_module.load_season(conn, year, team_manager, team_name, player_rows, matchup_records)
-            reg_season_weeks = (regular_season_weeks_config or {}).get(year) or (
-                regular_season_weeks_config or {}
-            ).get(str(year))
-            db_module.set_league_info(conn, year, league_id, league_name, reg_season_weeks)
-            print(f"  Loaded {year} into {sqlite_path}")
+            if conn is not None:
+                db_module.load_season(conn, year, team_manager, team_name, player_rows, matchup_records)
+                reg_season_weeks = (regular_season_weeks_config or {}).get(year) or (
+                    regular_season_weeks_config or {}
+                ).get(str(year))
+                db_module.set_league_info(conn, year, league_id, league_name, reg_season_weeks)
+                print(f"  Loaded {year} into {sqlite_path}")
 
-            windows = (contests_config or {}).get(year) or (contests_config or {}).get(str(year))
-            if windows:
-                db_module.set_contest_windows(conn, year, windows)
-                print(f"  Set {len(windows)} contest window(s) for {year}")
+                windows = (contests_config or {}).get(year) or (contests_config or {}).get(str(year))
+                if windows:
+                    db_module.set_contest_windows(conn, year, windows)
+                    print(f"  Set {len(windows)} contest window(s) for {year}")
+        except Exception as exc:  # noqa: BLE001 -- intentionally broad, see comment above
+            print(f"  Skipping {year}: {exc}", file=sys.stderr)
+            continue
 
     if conn is not None:
         conn.close()

@@ -1,0 +1,54 @@
+name: Pull ESPN data
+
+# Keeps the live site's Turso database fresh without anyone running the
+# pipeline by hand. Each run re-fetches every configured season from
+# scratch and upserts, so ESPN stat corrections in the days after a game
+# get picked up automatically on the next scheduled run -- there's no
+# separate "corrections" step.
+#
+# Schedule: every 30 minutes, but only on the NFL's primary game days
+# (Thu/Sun/Mon) to avoid burning Actions minutes the rest of the week.
+# Adjust the cron expression below, or just use "Run workflow" in the
+# Actions tab for an on-demand pull any time.
+on:
+  schedule:
+    - cron: "*/30 * * * 0,1,4"
+  workflow_dispatch: {}
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install libsql
+
+      - name: Build config.json (structure from config.example.json, secrets from GitHub)
+        env:
+          ESPN_S2: ${{ secrets.ESPN_S2 }}
+          ESPN_SWID: ${{ secrets.ESPN_SWID }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open("config.example.json") as f:
+              cfg = json.load(f)
+          cfg["espn_s2"] = os.environ["ESPN_S2"]
+          cfg["swid"] = os.environ["ESPN_SWID"]
+          with open("config.json", "w") as f:
+              json.dump(cfg, f)
+          PY
+
+      - name: Run pipeline (loads straight into Turso, skips the local .xlsx/.db)
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: python espn_pipeline.py --config config.json --output ""
