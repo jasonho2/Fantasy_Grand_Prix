@@ -1,8 +1,9 @@
-name: Pull ESPN data
+name: Pull fantasy data
 
 # Keeps the live site's Turso database fresh without anyone running the
-# pipeline by hand. Each run re-fetches every configured season from
-# scratch and upserts, so ESPN stat corrections in the days after a game
+# pipeline by hand, for every league configured in config.example.json
+# (ESPN and/or Sleeper). Each run re-fetches every configured league/season
+# from scratch and upserts, so stat corrections in the days after a game
 # get picked up automatically on the next scheduled run -- there's no
 # separate "corrections" step.
 #
@@ -41,14 +42,19 @@ jobs:
 
           with open("config.example.json") as f:
               cfg = json.load(f)
-          cfg["espn_s2"] = os.environ["ESPN_S2"]
-          cfg["swid"] = os.environ["ESPN_SWID"]
+          # Only ESPN leagues need credentials injected -- Sleeper's API is
+          # public read-only, so any "platform": "sleeper" entries in
+          # config.example.json are left as-is.
+          for league in cfg.get("leagues", []):
+              if league.get("platform") == "espn":
+                  league["espn_s2"] = os.environ["ESPN_S2"]
+                  league["espn_swid"] = os.environ["ESPN_SWID"]
           with open("config.json", "w") as f:
               json.dump(cfg, f)
           PY
 
-      - name: Run pipeline (loads straight into Turso, skips the local .xlsx/.db)
+      - name: Run pipeline (loads straight into Turso)
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-        run: python espn_pipeline.py --config config.json --output ""
+        run: python pipeline.py --config config.json

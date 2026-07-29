@@ -1,10 +1,15 @@
 """
-SQLite schema + loader for ESPN Fantasy Football data.
+SQLite schema + loader for the fantasy football pipeline. Multi-league,
+multi-platform: one physical database can hold any number of leagues, each
+pulled from ESPN or Sleeper (Yahoo may be added later), keyed by an internal
+league_id so the same manager/team names in two unrelated leagues never
+collide.
 
 Design: normalized so a frontend can run flexible queries (points by
 position, head-to-head history, season trends, etc.) without re-parsing
-Excel. Loads are upserts, so re-running the pipeline for a season you've
-already loaded updates rows in place instead of duplicating them.
+platform payloads. Loads are upserts, so re-running the pipeline for a
+league/season you've already loaded updates rows in place instead of
+duplicating them.
 
 Backends
 --------
@@ -20,39 +25,56 @@ Which one you get is controlled by environment variables:
 
 If TURSO_DATABASE_URL is set, connect() uses Turso (requires `pip install
 libsql`). Otherwise it falls back to a local SQLite file. Nothing else in
-this file, or in espn_pipeline.py, needs to change to switch backends.
+this file, or in the platform pullers, needs to change to switch backends.
 
 Schema
 ------
-managers                one row per real person (identified by ESPN display name)
-teams                   one row per (season, ESPN team id) -- links a team to its manager
-players                 one row per NFL player (deduped by ESPN player id when available)
-weekly_player_points    one row per starting-lineup player per week
-matchups                one row per matchup per week (home vs away, with both scores)
+leagues                 one row per registered league (platform + credentials
+                         + a URL-friendly slug). This is the "tenant" --
+                         everything else hangs off league_id.
+league_seasons          one row per (league, season): that season's
+                         platform-side id (ESPN's league id repeats every
+                         season; Sleeper's changes every season and is
+                         chained via previous_league_id), display name, and
+                         regular_season_weeks (drives the standings/playoff
+                         split -- see below).
+managers                one row per real person within a league (identified
+                         by platform display name), scoped by league_id so
+                         the same name in two different leagues doesn't merge.
+teams                   one row per (league, season, platform team id) --
+                         links a team to its manager.
+players                 one row per NFL player, deduped by (platform,
+                         platform_player_id) when available.
+weekly_player_points    one row per starting-lineup player per week.
+matchups                one row per matchup per week (home vs away, with both
+                         scores), scoped by league_id since two leagues can
+                         both use matchup id "1" in the same season.
+platform_sync_state     small key/value cache table, currently used to avoid
+                         re-fetching Sleeper's ~5MB player dump on every run
+                         (Sleeper asks integrators to pull it at most once a
+                         day).
 
 weekly_manager_points   VIEW: sums `weekly_player_points` per (season, week,
                         team_id) to get the manager's weekly total, so it
                         isn't stored twice. Deliberately NOT derived from
-                        matchups.home_points/away_points -- ESPN's
+                        matchups.home_points/away_points -- a platform's
                         season-level schedule can be missing a matchup entry
-                        for a given week (seen with consolation-bracket
+                        for a given week (seen with ESPN consolation-bracket
                         games during playoff weeks), which would silently
                         drop that team for that week. See the comment above
                         the view's SQL for details.
-leagues                 one row per season -- ESPN's league display name
-                        (e.g. for the "<league name> Grand Prix" page title).
 contest_windows         one row per side-contest window (e.g. weeks 1-4,
-                        5-8, 9-12, 13-17) for a season. Not hardcoded --
-                        windows vary by season/commissioner, so they're
-                        defined in config.json's "contests" section and
-                        loaded via set_contest_windows(). A manager's score
-                        in a contest is just the sum of weekly_manager_points
-                        over that window's weeks (computed at query time,
-                        not stored).
+                        5-8, 9-12, 13-17) for a league/season. Not hardcoded
+                        -- windows vary by league/commissioner, so they're
+                        configured per league and loaded via
+                        set_contest_windows(). A manager's score in a contest
+                        is just the sum of weekly_manager_points over that
+                        window's weeks (computed at query time, not stored).
 """
 
 import os
 import sqlite3
+import sys
 
 try:
     import libsql  # Turso's Python SDK -- only needed if TURSO_DATABASE_URL is set
@@ -60,25 +82,63 @@ except ImportError:
     libsql = None
 
 SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS leagues (
+    league_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform TEXT NOT NULL,              -- 'espn' | 'sleeper'
+    slug TEXT NOT NULL UNIQUE,           -- URL-friendly identifier used in routes/links
+    display_name TEXT,                   -- shown in the UI, falls back to the platform's own league name
+    espn_league_id INTEGER,              -- ESPN only
+    espn_s2 TEXT,                        -- ESPN only, private leagues (encrypted at rest by the caller)
+    espn_swid TEXT,                      -- ESPN only, private leagues
+    sleeper_league_id TEXT,              -- Sleeper only -- that league's CURRENT/most recent season id,
+                                          -- earlier seasons are resolved by walking previous_league_id
+                                          -- and cached per-season in league_seasons.external_id
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS league_seasons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id INTEGER NOT NULL REFERENCES leagues(league_id),
+    season INTEGER NOT NULL,
+    external_id TEXT,                    -- that season's platform-side league id (TEXT: Sleeper's ids are
+                                          -- ~18 digits and overflow JS's safe integer range as a Number)
+    league_name TEXT,
+    -- Length of the regular season in weeks. Drives the Season Leaderboard
+    -- (standings + regular-season points trend are scoped to weeks
+    -- 1..regular_season_weeks) and the separate playoff points trend
+    -- (regular_season_weeks+1..latest played week). Neither platform
+    -- exposes this reliably enough to auto-detect, so it's configured
+    -- per league/season.
+    regular_season_weeks INTEGER,
+    UNIQUE(league_id, season)
+);
+CREATE INDEX IF NOT EXISTS idx_league_seasons_league ON league_seasons(league_id);
+
 CREATE TABLE IF NOT EXISTS managers (
     manager_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    manager_name TEXT NOT NULL UNIQUE
+    league_id INTEGER NOT NULL REFERENCES leagues(league_id),
+    manager_name TEXT NOT NULL,
+    UNIQUE(league_id, manager_name)
 );
 
 CREATE TABLE IF NOT EXISTS teams (
     team_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id INTEGER NOT NULL REFERENCES leagues(league_id),
     season INTEGER NOT NULL,
-    espn_team_id INTEGER NOT NULL,
+    platform_team_id TEXT NOT NULL,      -- ESPN's numeric team id, or Sleeper's roster_id, as text
     team_name TEXT,
     manager_id INTEGER NOT NULL REFERENCES managers(manager_id),
-    UNIQUE(season, espn_team_id)
+    UNIQUE(league_id, season, platform_team_id)
 );
+CREATE INDEX IF NOT EXISTS idx_teams_league_season ON teams(league_id, season);
 
 CREATE TABLE IF NOT EXISTS players (
     player_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    espn_player_id INTEGER UNIQUE,
+    platform TEXT NOT NULL,
+    platform_player_id TEXT,
     player_name TEXT NOT NULL,
-    position TEXT
+    position TEXT,
+    UNIQUE(platform, platform_player_id)
 );
 
 CREATE TABLE IF NOT EXISTS weekly_player_points (
@@ -96,83 +156,109 @@ CREATE INDEX IF NOT EXISTS idx_wpp_player ON weekly_player_points(player_id);
 
 CREATE TABLE IF NOT EXISTS matchups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id INTEGER NOT NULL REFERENCES leagues(league_id),
     season INTEGER NOT NULL,
     week INTEGER NOT NULL,
-    espn_matchup_id INTEGER,
+    platform_matchup_id TEXT,
     home_team_id INTEGER NOT NULL REFERENCES teams(team_id),
     away_team_id INTEGER REFERENCES teams(team_id),
     home_points REAL,
     away_points REAL,
     winner TEXT,
     is_bye INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(season, espn_matchup_id)
+    UNIQUE(league_id, season, platform_matchup_id)
 );
-CREATE INDEX IF NOT EXISTS idx_matchups_season_week ON matchups(season, week);
+CREATE INDEX IF NOT EXISTS idx_matchups_league_season_week ON matchups(league_id, season, week);
 
 -- Derived from weekly_player_points (sum of that team's starters), NOT from
--- matchups.home_points/away_points. Discovered via real league data: ESPN's
--- season-level schedule can be missing a matchup entry for a given week
--- (seen with consolation-bracket games during playoff weeks), which would
--- silently drop that team from this view for that week if it were built
--- from matchups instead. weekly_player_points is populated from each team's
--- boxscore directly and stays complete even when that happens, so every
--- team appears every week it fielded a lineup, regardless of whether ESPN's
--- schedule listing shows a matchup for it.
+-- matchups.home_points/away_points. Discovered via real league data: a
+-- platform's season-level schedule can be missing a matchup entry for a
+-- given week (seen with ESPN consolation-bracket games during playoff
+-- weeks), which would silently drop that team from this view for that week
+-- if it were built from matchups instead. weekly_player_points is populated
+-- from each team's boxscore directly and stays complete even when that
+-- happens, so every team appears every week it fielded a lineup, regardless
+-- of whether the platform's schedule listing shows a matchup for it.
 DROP VIEW IF EXISTS weekly_manager_points;
 CREATE VIEW weekly_manager_points AS
     SELECT season, week, team_id, ROUND(SUM(points), 2) AS points
     FROM weekly_player_points
     GROUP BY season, week, team_id;
 
-CREATE TABLE IF NOT EXISTS leagues (
-    season INTEGER PRIMARY KEY,
-    espn_league_id INTEGER NOT NULL,
-    league_name TEXT,
-    -- Length of the regular season in weeks. Drives the Season Leaderboard
-    -- (standings + regular-season points trend are scoped to weeks
-    -- 1..regular_season_weeks) and the separate playoff points trend
-    -- (regular_season_weeks+1..latest played week). Configured per season
-    -- in config.json, same reasoning as contest_windows -- this varies by
-    -- season/league setup and ESPN doesn't expose it in a field reliable
-    -- enough to trust auto-detecting.
-    regular_season_weeks INTEGER
-);
-
 CREATE TABLE IF NOT EXISTS contest_windows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id INTEGER NOT NULL REFERENCES leagues(league_id),
     season INTEGER NOT NULL,
     contest_name TEXT NOT NULL,
     start_week INTEGER NOT NULL,
     end_week INTEGER NOT NULL,
     sort_order INTEGER NOT NULL,
-    UNIQUE(season, contest_name)
+    UNIQUE(league_id, season, contest_name)
 );
-CREATE INDEX IF NOT EXISTS idx_contest_windows_season ON contest_windows(season);
+CREATE INDEX IF NOT EXISTS idx_contest_windows_league_season ON contest_windows(league_id, season);
+
+-- Small cache of "when did we last do X" markers. Currently used to respect
+-- Sleeper's guidance to pull their ~5MB full-player-list endpoint at most
+-- once a day, even though the pipeline itself may run every 30 minutes.
+CREATE TABLE IF NOT EXISTS platform_sync_state (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
 def _split_statements(sql):
     """Split a script into individual statements. Only sqlite3 supports
     conn.executescript(); libsql's execute() runs one statement at a time,
-    so we split and loop -- this works identically on both backends."""
-    return [s.strip() for s in sql.split(";") if s.strip()]
+    so we split and loop -- this works identically on both backends.
+
+    Strips `-- ...` line comments before splitting on ";", so a semicolon
+    that shows up inside a comment (e.g. "-- shown in the UI; falls back
+    to...") doesn't get mistaken for a statement boundary. Safe for this
+    schema since none of the SQL itself uses string literals containing
+    "--" or ";"."""
+    without_comments = "\n".join(line.split("--", 1)[0] for line in sql.splitlines())
+    return [s.strip() for s in without_comments.split(";") if s.strip()]
 
 
-# Columns added to existing tables after they first shipped. "CREATE TABLE
-# IF NOT EXISTS" is a no-op once the table already exists, so adding a
-# column to SCHEMA_SQL alone does nothing for databases created before that
-# change -- this list is the migration path for those. Safe to run every
-# connect(): each entry is only applied if the column is actually missing.
-COLUMN_MIGRATIONS = [
-    ("leagues", "regular_season_weeks", "INTEGER"),
-]
+def _migrate_legacy_single_league_schema(conn):
+    """Databases created before multi-league support had a single implicit
+    league: `leagues` was keyed by season (season INTEGER PRIMARY KEY) and
+    no table had a league_id column. Detect that shape and rebuild the data
+    tables fresh under the new schema, rather than writing a cell-by-cell
+    ALTER TABLE migration -- every row in every one of these tables is fully
+    re-derivable by rerunning the pipeline (all upserts, sourced live from
+    the platform's API), so there's no user-authored data at risk.
 
-
-def _apply_column_migrations(conn):
-    for table, column, coltype in COLUMN_MIGRATIONS:
-        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        if column not in existing:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+    After this runs once against a given database, rerun the pipeline (or
+    just wait for the next scheduled GitHub Actions run) to repopulate it."""
+    tables = {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "leagues" not in tables:
+        return  # brand-new database, nothing to migrate
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(leagues)").fetchall()}
+    if "league_id" in columns:
+        return  # already on the new schema
+    print(
+        "db.py: detected a pre-multi-league database -- rebuilding tables "
+        "under the new schema. Data is fully re-derived from the next "
+        "pipeline run.",
+        file=sys.stderr,
+    )
+    for table in [
+        "weekly_player_points",
+        "matchups",
+        "contest_windows",
+        "teams",
+        "players",
+        "managers",
+        "leagues",
+    ]:
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+    conn.execute("DROP VIEW IF EXISTS weekly_manager_points")
+    conn.commit()
 
 
 def connect(db_path):
@@ -202,123 +288,214 @@ def connect(db_path):
         # production DB under heavier write concurrency.
         conn.execute("PRAGMA journal_mode = MEMORY")
 
+    _migrate_legacy_single_league_schema(conn)
     for statement in _split_statements(SCHEMA_SQL):
         conn.execute(statement)
-    _apply_column_migrations(conn)
     return conn
 
 
-def get_or_create_manager(conn, name):
-    row = conn.execute("SELECT manager_id FROM managers WHERE manager_name = ?", (name,)).fetchone()
-    if row:
-        return row[0]
-    row = conn.execute(
-        "INSERT INTO managers (manager_name) VALUES (?) RETURNING manager_id", (name,)
-    ).fetchone()
-    return row[0]
+# ---------------------------------------------------------------------------
+# Leagues
+# ---------------------------------------------------------------------------
 
-
-def get_or_create_team(conn, season, espn_team_id, team_name, manager_id):
-    row = conn.execute(
-        "SELECT team_id FROM teams WHERE season = ? AND espn_team_id = ?", (season, espn_team_id)
-    ).fetchone()
+def get_or_create_league(
+    conn,
+    platform,
+    slug,
+    display_name=None,
+    espn_league_id=None,
+    espn_s2=None,
+    espn_swid=None,
+    sleeper_league_id=None,
+):
+    """slug is the stable identifier callers pass in (derived from config, or
+    typed by a user in the "add a league" form) -- everything else here is
+    updated in place on repeat calls, so editing credentials/display name and
+    rerunning is all it takes to change them."""
+    row = conn.execute("SELECT league_id FROM leagues WHERE slug = ?", (slug,)).fetchone()
     if row:
+        league_id = row[0]
         conn.execute(
-            "UPDATE teams SET team_name = ?, manager_id = ? WHERE team_id = ?", (team_name, manager_id, row[0])
+            """UPDATE leagues SET
+                    platform = ?,
+                    display_name = COALESCE(?, display_name),
+                    espn_league_id = COALESCE(?, espn_league_id),
+                    espn_s2 = COALESCE(?, espn_s2),
+                    espn_swid = COALESCE(?, espn_swid),
+                    sleeper_league_id = COALESCE(?, sleeper_league_id)
+               WHERE league_id = ?""",
+            (platform, display_name, espn_league_id, espn_s2, espn_swid, sleeper_league_id, league_id),
         )
-        return row[0]
-    row = conn.execute(
-        """INSERT INTO teams (season, espn_team_id, team_name, manager_id)
-           VALUES (?, ?, ?, ?) RETURNING team_id""",
-        (season, espn_team_id, team_name, manager_id),
-    ).fetchone()
-    return row[0]
-
-
-def get_or_create_player(conn, espn_player_id, name, position):
-    if espn_player_id is not None:
-        row = conn.execute("SELECT player_id FROM players WHERE espn_player_id = ?", (espn_player_id,)).fetchone()
-        if row:
-            return row[0]
+    else:
         row = conn.execute(
-            """INSERT INTO players (espn_player_id, player_name, position)
-               VALUES (?, ?, ?) RETURNING player_id""",
-            (espn_player_id, name, position),
+            """INSERT INTO leagues
+                    (platform, slug, display_name, espn_league_id, espn_s2, espn_swid, sleeper_league_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               RETURNING league_id""",
+            (platform, slug, display_name, espn_league_id, espn_s2, espn_swid, sleeper_league_id),
         ).fetchone()
-        return row[0]
-
-    # No ESPN player id available -- fall back to matching on name + position.
-    row = conn.execute(
-        "SELECT player_id FROM players WHERE player_name = ? AND position = ? AND espn_player_id IS NULL",
-        (name, position),
-    ).fetchone()
-    if row:
-        return row[0]
-    row = conn.execute(
-        """INSERT INTO players (espn_player_id, player_name, position)
-           VALUES (NULL, ?, ?) RETURNING player_id""",
-        (name, position),
-    ).fetchone()
-    return row[0]
+        league_id = row[0]
+    conn.commit()
+    return league_id
 
 
-def set_league_info(conn, season, espn_league_id, league_name, regular_season_weeks=None):
+def list_leagues(conn):
+    rows = conn.execute(
+        "SELECT league_id, platform, slug, display_name, espn_league_id, sleeper_league_id FROM leagues ORDER BY slug"
+    ).fetchall()
+    cols = ["league_id", "platform", "slug", "display_name", "espn_league_id", "sleeper_league_id"]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def set_league_season_info(conn, league_id, season, external_id, league_name, regular_season_weeks=None):
     """regular_season_weeks: pass None to leave an existing value alone
     (e.g. if a later call only knows the league name) -- COALESCE keeps
     whatever was already stored instead of clobbering it with NULL."""
     conn.execute(
-        """INSERT INTO leagues (season, espn_league_id, league_name, regular_season_weeks)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(season) DO UPDATE SET
-                espn_league_id = excluded.espn_league_id,
+        """INSERT INTO league_seasons (league_id, season, external_id, league_name, regular_season_weeks)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(league_id, season) DO UPDATE SET
+                external_id = excluded.external_id,
                 league_name = excluded.league_name,
-                regular_season_weeks = COALESCE(excluded.regular_season_weeks, leagues.regular_season_weeks)""",
-        (season, espn_league_id, league_name, regular_season_weeks),
+                regular_season_weeks = COALESCE(excluded.regular_season_weeks, league_seasons.regular_season_weeks)""",
+        (league_id, season, str(external_id) if external_id is not None else None, league_name, regular_season_weeks),
     )
     conn.commit()
 
 
-def set_contest_windows(conn, season, windows):
+def set_contest_windows(conn, league_id, season, windows):
     """
     windows: list of {"name": str, "start_week": int, "end_week": int}, in
     the order they should be displayed.
 
-    Replaces the whole set for the season (delete then re-insert) rather
-    than upserting by name. An upsert keyed on contest_name can't handle
-    renaming a window (e.g. "Contest 1" -> "Mushroom Cup") -- since the name
-    changed, it wouldn't match the old row and would just add a second one
-    instead of replacing it. Full replace is simple and correct for a small,
-    fully-config-driven list like this.
+    Replaces the whole set for the league/season (delete then re-insert)
+    rather than upserting by name. An upsert keyed on contest_name can't
+    handle renaming a window (e.g. "Contest 1" -> "Mushroom Cup") -- since
+    the name changed, it wouldn't match the old row and would just add a
+    second one instead of replacing it. Full replace is simple and correct
+    for a small, fully-config-driven list like this.
     """
-    conn.execute("DELETE FROM contest_windows WHERE season = ?", (season,))
+    conn.execute("DELETE FROM contest_windows WHERE league_id = ? AND season = ?", (league_id, season))
     for i, w in enumerate(windows):
         conn.execute(
-            """INSERT INTO contest_windows (season, contest_name, start_week, end_week, sort_order)
-               VALUES (?, ?, ?, ?, ?)""",
-            (season, w["name"], w["start_week"], w["end_week"], i),
+            """INSERT INTO contest_windows (league_id, season, contest_name, start_week, end_week, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (league_id, season, w["name"], w["start_week"], w["end_week"], i),
         )
     conn.commit()
 
 
-def load_season(conn, year, team_manager, team_name, player_rows, matchup_records):
+# ---------------------------------------------------------------------------
+# Sync state cache (e.g. Sleeper's full player list)
+# ---------------------------------------------------------------------------
+
+def get_sync_state(conn, key):
+    row = conn.execute("SELECT value, updated_at FROM platform_sync_state WHERE key = ?", (key,)).fetchone()
+    return (row[0], row[1]) if row else (None, None)
+
+
+def set_sync_state(conn, key, value):
+    conn.execute(
+        """INSERT INTO platform_sync_state (key, value, updated_at) VALUES (?, ?, datetime('now'))
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')""",
+        (key, value),
+    )
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Managers / teams / players
+# ---------------------------------------------------------------------------
+
+def get_or_create_manager(conn, league_id, name):
+    row = conn.execute(
+        "SELECT manager_id FROM managers WHERE league_id = ? AND manager_name = ?", (league_id, name)
+    ).fetchone()
+    if row:
+        return row[0]
+    row = conn.execute(
+        "INSERT INTO managers (league_id, manager_name) VALUES (?, ?) RETURNING manager_id",
+        (league_id, name),
+    ).fetchone()
+    return row[0]
+
+
+def get_or_create_team(conn, league_id, season, platform_team_id, team_name, manager_id):
+    platform_team_id = str(platform_team_id)
+    row = conn.execute(
+        "SELECT team_id FROM teams WHERE league_id = ? AND season = ? AND platform_team_id = ?",
+        (league_id, season, platform_team_id),
+    ).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE teams SET team_name = ?, manager_id = ? WHERE team_id = ?",
+            (team_name, manager_id, row[0]),
+        )
+        return row[0]
+    row = conn.execute(
+        """INSERT INTO teams (league_id, season, platform_team_id, team_name, manager_id)
+           VALUES (?, ?, ?, ?, ?) RETURNING team_id""",
+        (league_id, season, platform_team_id, team_name, manager_id),
+    ).fetchone()
+    return row[0]
+
+
+def get_or_create_player(conn, platform, platform_player_id, name, position):
+    if platform_player_id is not None:
+        platform_player_id = str(platform_player_id)
+        row = conn.execute(
+            "SELECT player_id FROM players WHERE platform = ? AND platform_player_id = ?",
+            (platform, platform_player_id),
+        ).fetchone()
+        if row:
+            return row[0]
+        row = conn.execute(
+            """INSERT INTO players (platform, platform_player_id, player_name, position)
+               VALUES (?, ?, ?, ?) RETURNING player_id""",
+            (platform, platform_player_id, name, position),
+        ).fetchone()
+        return row[0]
+
+    # No platform player id available -- fall back to matching on name + position
+    # (within the same platform, so a same-named player on a different
+    # platform's leagues doesn't collide).
+    row = conn.execute(
+        """SELECT player_id FROM players
+           WHERE platform = ? AND player_name = ? AND position = ? AND platform_player_id IS NULL""",
+        (platform, name, position),
+    ).fetchone()
+    if row:
+        return row[0]
+    row = conn.execute(
+        """INSERT INTO players (platform, platform_player_id, player_name, position)
+           VALUES (?, NULL, ?, ?) RETURNING player_id""",
+        (platform, name, position),
+    ).fetchone()
+    return row[0]
+
+
+def load_season(conn, league_id, platform, year, team_manager, team_name, player_rows, matchup_records):
     """
-    team_manager: {espn_team_id: manager_name}
-    team_name: {espn_team_id: team_name}
-    player_rows: list of dicts from espn_pipeline.build_player_points_rows
-                 (must include espn_team_id and espn_player_id)
-    matchup_records: list of dicts from espn_pipeline.build_dataframes'
-                      4th return value (raw ESPN team ids, not names)
+    league_id: internal leagues.league_id (see get_or_create_league)
+    platform: 'espn' | 'sleeper' -- used to scope player dedup
+    team_manager: {platform_team_id: manager_name}
+    team_name: {platform_team_id: team_name}
+    player_rows: list of dicts (must include platform_team_id and platform_player_id)
+    matchup_records: list of dicts with home_platform_team_id/away_platform_team_id
+                      (raw platform team ids, not names)
     """
-    team_id_map = {}  # espn_team_id -> internal teams.team_id
-    for espn_team_id, manager_name in team_manager.items():
-        manager_id = get_or_create_manager(conn, manager_name)
-        team_id_map[espn_team_id] = get_or_create_team(
-            conn, year, espn_team_id, team_name.get(espn_team_id), manager_id
+    team_id_map = {}  # platform_team_id (as given) -> internal teams.team_id
+    for platform_team_id, manager_name in team_manager.items():
+        manager_id = get_or_create_manager(conn, league_id, manager_name)
+        team_id_map[platform_team_id] = get_or_create_team(
+            conn, league_id, year, platform_team_id, team_name.get(platform_team_id), manager_id
         )
 
     for row in player_rows:
-        player_id = get_or_create_player(conn, row.get("espn_player_id"), row["player"], row["position"])
-        team_id = team_id_map.get(row["espn_team_id"])
+        player_id = get_or_create_player(
+            conn, platform, row.get("platform_player_id"), row["player"], row["position"]
+        )
+        team_id = team_id_map.get(row["platform_team_id"])
         if team_id is None:
             continue
         conn.execute(
@@ -329,25 +506,26 @@ def load_season(conn, year, team_manager, team_name, player_rows, matchup_record
         )
 
     for m in matchup_records:
-        home_team_id = team_id_map.get(m["home_espn_team_id"])
+        home_team_id = team_id_map.get(m["home_platform_team_id"])
         away_team_id = (
-            team_id_map.get(m["away_espn_team_id"]) if m["away_espn_team_id"] is not None else None
+            team_id_map.get(m["away_platform_team_id"]) if m["away_platform_team_id"] is not None else None
         )
         if home_team_id is None:
             continue
         conn.execute(
-            """INSERT INTO matchups (season, week, espn_matchup_id, home_team_id, away_team_id,
+            """INSERT INTO matchups (league_id, season, week, platform_matchup_id, home_team_id, away_team_id,
                                       home_points, away_points, winner, is_bye)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(season, espn_matchup_id) DO UPDATE SET
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(league_id, season, platform_matchup_id) DO UPDATE SET
                     home_points = excluded.home_points,
                     away_points = excluded.away_points,
                     winner = excluded.winner,
                     is_bye = excluded.is_bye""",
             (
+                league_id,
                 year,
                 m["week"],
-                m["matchup_id"],
+                str(m["matchup_id"]) if m["matchup_id"] is not None else None,
                 home_team_id,
                 away_team_id,
                 m["home_points"],

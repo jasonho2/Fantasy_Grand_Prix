@@ -1,32 +1,75 @@
-# ESPN Fantasy Football Dashboard
+# Fantasy Football Dashboard
 
-Pulls data from ESPN Fantasy Football into a database, and serves it through
-a Next.js dashboard (standings & trends, player/position breakdown,
-head-to-head & schedule).
+Pulls data from fantasy football leagues -- ESPN and Sleeper today, Yahoo
+possibly later -- into a database, and serves it through a Next.js
+dashboard (standings & trends, player/position breakdown, head-to-head &
+schedule, Grand Prix contests). Multi-league: the database can hold any
+number of leagues at once, each on its own platform.
 
 ## How it fits together
 
 ```
-espn_pipeline.py  --writes-->  SQLite file (local dev)  or  Turso (production)
-                                          ^
-                                          |  reads via @libsql/client
-                                     web/  (Next.js app, deployed on Vercel)
+pipeline.py  --writes-->  SQLite file (local dev)  or  Turso (production)
+     ^                              ^
+     |                              |  reads via @libsql/client
+platforms/espn.py                web/  (Next.js app, deployed on Vercel)
+platforms/sleeper.py
 ```
 
-The same `db.py` schema and the same Next.js query code work against either
-backend -- which one you're pointed at is just an environment variable.
+`pipeline.py` loops over every league in `config.json`'s `"leagues"` list,
+hands each one to the matching module in `platforms/` (pure API-fetching
+code, one module per platform) to pull, then loads the normalized result
+through `db.py`'s shared schema/loader. The same schema and the same
+Next.js query code work against either database backend -- which one
+you're pointed at is just an environment variable.
 
 ## 1. Pull data (Python)
 
 ```bash
 pip install -r requirements.txt
-python espn_pipeline.py --config config.json
+python pipeline.py --config config.json
 ```
 
-This writes `espn_ff_1083280.xlsx` and `espn_ff_1083280.db` (see `config.json`
-for the league ID / years / output paths -- copy `config.example.json` if
-you're setting this up fresh; `config.json` holds your ESPN cookies and is
-gitignored on purpose).
+Copy `config.example.json` to `config.json` if you're setting this up
+fresh (`config.json` holds real credentials and is gitignored on purpose).
+`config.json`'s `"leagues"` is a list -- one entry per league:
+
+```json
+{
+  "sqlite": "fantasy_grand_prix.db",
+  "leagues": [
+    {
+      "slug": "el-tri-ffl",
+      "platform": "espn",
+      "espn_league_id": 1083280,
+      "espn_s2": "...",
+      "espn_swid": "...",
+      "years": [2024, 2025, 2026],
+      "regular_season_weeks": { "2025": 14 },
+      "contests": { "2025": [ { "name": "Mushroom Cup", "start_week": 1, "end_week": 3 } ] }
+    },
+    {
+      "slug": "some-sleeper-league",
+      "platform": "sleeper",
+      "sleeper_league_id": "<current season's Sleeper league id>",
+      "years": [2025, 2026],
+      "regular_season_weeks": { "2025": 14 },
+      "contests": {}
+    }
+  ]
+}
+```
+
+Sleeper leagues need no credentials at all -- its API is public read-only,
+so `sleeper_league_id` (the *current* season's id; earlier seasons are
+found automatically via Sleeper's `previous_league_id` chain) is the only
+platform-specific field. Add or remove leagues by editing this list and
+rerunning; each league/season load is an independent upsert, so adding a
+new league never touches existing ones.
+
+`espn_pipeline.py` still works standalone (single ESPN league, optional
+`.xlsx` export) if you just want a quick local export -- `pipeline.py` is
+the multi-league, DB-only entrypoint used for everything else in this doc.
 
 ## 2. Run the dashboard locally
 
@@ -63,7 +106,7 @@ load your data into Turso instead of (or in addition to) the local file:
 export TURSO_DATABASE_URL="libsql://espnff-<your-org>.turso.io"
 export TURSO_AUTH_TOKEN="<token from above>"
 pip install libsql
-python espn_pipeline.py --config config.json --output ""   # skip xlsx, just load the DB
+python pipeline.py --config config.json
 ```
 
 Whenever you want the live site to reflect new scores, rerun that command
@@ -88,10 +131,11 @@ above) whenever you want to refresh scores.
 Steps 3 and 4 make the site *able* to show fresh data without a redeploy,
 but someone still has to rerun the pipeline. `.github/workflows/pull-data.yml`
 does that automatically on a schedule, so nobody has to run anything by
-hand -- including picking up ESPN's stat corrections, since every run
-re-fetches each configured season from scratch and upserts (there's no
-separate "corrections" step; a normal rerun a day or two later just
-overwrites the box scores with whatever ESPN now says is official).
+hand -- for every league in `config.example.json`, ESPN or Sleeper alike --
+including picking up stat corrections, since every run re-fetches each
+configured league/season from scratch and upserts (there's no separate
+"corrections" step; a normal rerun a day or two later just overwrites the
+box scores with whatever the platform now says is official).
 
 Add four repo secrets at **GitHub repo -> Settings -> Secrets and variables
 -> Actions -> New repository secret**:
@@ -103,36 +147,59 @@ Add four repo secrets at **GitHub repo -> Settings -> Secrets and variables
 | `TURSO_DATABASE_URL` | from `turso db show espnff` |
 | `TURSO_AUTH_TOKEN` | from `turso db tokens create espnff` |
 
-That's it -- the workflow builds a `config.json` at runtime from the
-non-secret `config.example.json` (league ID, years, regular season weeks,
-contest windows) plus those two ESPN secrets, then runs the pipeline
-pointed at Turso via the other two secrets. Nothing sensitive is ever
-committed to the repo.
+Only ESPN leagues need the first two -- Sleeper's API is public read-only,
+so a Sleeper league entry in `config.example.json` needs nothing beyond its
+`sleeper_league_id`. The workflow builds a `config.json` at runtime from
+the non-secret `config.example.json` (every league's platform, ids, years,
+regular season weeks, contest windows) plus those ESPN secrets injected
+into any `"platform": "espn"` entries, then runs `pipeline.py` pointed at
+Turso via the other two secrets. Nothing sensitive is ever committed to
+the repo.
 
 It's scheduled for every 30 minutes on Thursday/Sunday/Monday (the NFL's
 primary game days) to avoid burning Actions minutes the rest of the week --
 edit the `cron:` line in the workflow file to change that. You can also
 trigger a pull on demand any time from the repo's **Actions** tab ->
-"Pull ESPN data" -> **Run workflow**, no terminal needed.
+"Pull fantasy data" -> **Run workflow**, no terminal needed.
 
-If a season in `years` doesn't exist yet on ESPN (e.g. next year's league
-hasn't been rolled over), that one season is skipped with a warning in the
-run's log instead of failing the whole job -- every other season still
-gets pulled and committed.
+If a league or a season within it isn't available (e.g. next year's ESPN
+league hasn't been rolled over yet, or a Sleeper league id is wrong), that
+one league/season is skipped with a warning in the run's log instead of
+failing the whole job -- every other league/season still gets pulled and
+committed.
 
 ## Project layout
 
-- `espn_pipeline.py` -- pulls from ESPN's API, writes Excel and/or DB.
-- `db.py` -- schema + upsert loader, works against local SQLite or Turso.
-- `config.json` -- your league ID, years, ESPN cookies, contest windows (gitignored).
-- `config.example.json` -- same shape as `config.json` minus the cookies; what the
-  GitHub Actions workflow uses as a template.
-- `.github/workflows/pull-data.yml` -- scheduled job that reruns the pipeline
-  against Turso automatically (see "5. Automate it" above).
+- `pipeline.py` -- multi-league entrypoint: loops `config.json`'s `"leagues"`
+  list, dispatches each to the matching module in `platforms/`, loads the
+  result through `db.py`.
+- `platforms/espn.py`, `platforms/sleeper.py` -- one puller per platform,
+  pure API-fetching code normalized to a common shape (see
+  `platforms/__init__.py` for the interface both implement).
+- `espn_pipeline.py` -- the original single-ESPN-league CLI (kept for quick
+  local `.xlsx` exports; not used by the automated workflow anymore).
+- `db.py` -- multi-league schema + upsert loader, works against local
+  SQLite or Turso. A database created before multi-league support was
+  added is auto-migrated on first connect (see the comment on
+  `_migrate_legacy_single_league_schema` in `db.py`) -- since every row is
+  re-derived from the platform APIs, that migration rebuilds the data
+  tables fresh rather than attempting a cell-by-cell schema change, so
+  rerun the pipeline (or wait for the next scheduled run) right after
+  upgrading an existing database.
+- `config.json` -- your leagues (platform, ids, credentials, years, contest
+  windows), gitignored.
+- `config.example.json` -- same shape as `config.json` minus real
+  credentials; what the GitHub Actions workflow uses as a template.
+- `.github/workflows/pull-data.yml` -- scheduled job that reruns the
+  pipeline against Turso automatically for every configured league (see
+  "5. Automate it" above).
 - `web/` -- Next.js dashboard.
   - `app/standings/`, `app/players/`, `app/matchups/`, `app/contests/` -- the four pages.
   - `app/api/*/route.js` -- API routes that query the database.
   - `lib/db.js` -- shared database client.
+  - Currently still scoped to a single league implicitly (the first/only
+    one in the database) -- a league switcher and an in-app "add a league"
+    flow are the next piece to build on top of this multi-league backend.
 
 ## Point-total contests (Contests page)
 
@@ -149,8 +216,8 @@ These placement points accumulate across a window's weeks and determine the
 leaderboard ranking; a manager's raw fantasy-point total for the window is
 still shown, but only as a reference column, not the sort key.
 
-Windows aren't hardcoded, since they can change by season or by commissioner
-choice. Define them in `config.json`:
+Windows aren't hardcoded, since they can change by league, season, or
+commissioner choice. Define them per league in `config.json`:
 
 ```json
 "contests": {
@@ -163,7 +230,7 @@ choice. Define them in `config.json`:
 }
 ```
 
-Rerunning `python espn_pipeline.py --config config.json` loads/updates these
+Rerunning `python pipeline.py --config config.json` loads/updates these
 windows (upsert, safe to rerun -- editing a window's weeks and rerunning
 updates it in place). The Contests page computes each manager's weekly rank
 and placement points at query time from `weekly_manager_points` -- nothing
@@ -172,9 +239,21 @@ and rerunning is all it takes to change a window's boundaries.
 
 ## Notes / known limitations
 
+- The frontend (`web/`) doesn't have a league switcher or an "add a league"
+  UI yet -- it's still built assuming a single league. The backend
+  (`pipeline.py`, `db.py`, `platforms/`) is fully multi-league; wiring the
+  frontend up to it (league-scoped API routes + a switcher + an onboarding
+  form) is the next phase.
+- Sleeper's per-player weekly points are an approximation (closest of
+  standard/half-PPR/full-PPR to the league's actual reception scoring --
+  see the comment at the top of `platforms/sleeper.py`), since Sleeper's
+  stats endpoint doesn't expose a fully custom-scoring-settings-aware
+  total. Team-level weekly totals (standings, wins/losses, points-for) are
+  exact either way -- they come straight from Sleeper's own computed score,
+  not from summing the approximated player-level numbers.
 - ESPN's `espn_s2`/`SWID` cookies expire periodically -- if the pipeline
   starts returning 401s, re-grab them from your browser (see chat history /
-  ask again for the steps).
+  ask again for the steps). Sleeper leagues need no credentials at all.
 - The player/position breakdown and head-to-head records are computed in
   the browser from the full season's rows (a season is a couple thousand
   rows at most), so there's no pagination or server-side filtering to worry
