@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-/** Minimal fetch hook: { data, loading, error }. Refetches when url changes. */
+/**
+ * Minimal fetch hook: { data, loading, error, refetch }. Refetches
+ * automatically when url changes, or on demand via refetch() (e.g. after a
+ * mutation that should update what's on screen without a full page reload).
+ */
 export function useJson(url) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!url) return;
@@ -35,7 +40,9 @@ export function useJson(url) {
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, nonce]);
 
-  return { data, loading, error };
+  const refetch = useCallback(() => setNonce((n) => n + 1), []);
+
+  return { data, loading, error, refetch };
 }

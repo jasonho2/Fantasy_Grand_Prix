@@ -222,8 +222,164 @@ function EspnForm({ onDone }) {
   );
 }
 
+function RenameForm({ league, onDone, onCancel }) {
+  const [displayName, setDisplayName] = useState(league.displayName || "");
+  const [status, setStatus] = useState("idle");
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setStatus("submitting");
+    setError(null);
+    try {
+      const res = await fetch(`/api/leagues/${encodeURIComponent(league.slug)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName: displayName.trim() }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+      onDone(body);
+    } catch (err) {
+      setError(err.message);
+      setStatus("error");
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <input
+        type="text"
+        value={displayName}
+        onChange={(e) => setDisplayName(e.target.value)}
+        required
+        autoFocus
+        style={{ flex: "1 1 200px" }}
+      />
+      <button type="submit" className="week-chip selected" disabled={status === "submitting"}>
+        {status === "submitting" ? "Saving..." : "Save"}
+      </button>
+      <button type="button" className="week-chip" onClick={onCancel}>
+        Cancel
+      </button>
+      {error && <div className="error-state" style={{ width: "100%" }}>{error}</div>}
+    </form>
+  );
+}
+
+function DeleteForm({ league, onDone, onCancel }) {
+  const [passphrase, setPassphrase] = useState("");
+  const [status, setStatus] = useState("idle");
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setStatus("submitting");
+    setError(null);
+    try {
+      const res = await fetch(`/api/leagues/${encodeURIComponent(league.slug)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passphrase }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+      onDone(league.slug);
+    } catch (err) {
+      setError(err.message);
+      setStatus("error");
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <p style={{ width: "100%", margin: 0, color: "var(--loss)", fontSize: 13 }}>
+        This permanently deletes every team, matchup, weekly score, and contest result for{" "}
+        <strong>{league.displayName || league.slug}</strong>. This can&apos;t be undone.
+      </p>
+      <input
+        type="password"
+        placeholder="Passphrase"
+        value={passphrase}
+        onChange={(e) => setPassphrase(e.target.value)}
+        required
+        autoFocus
+        style={{ flex: "1 1 200px" }}
+      />
+      <button type="submit" className="week-chip" disabled={status === "submitting"} style={{ borderColor: "var(--loss)", color: "var(--loss)" }}>
+        {status === "submitting" ? "Deleting..." : "Confirm Delete"}
+      </button>
+      <button type="button" className="week-chip" onClick={onCancel}>
+        Cancel
+      </button>
+      {error && <div className="error-state" style={{ width: "100%" }}>{error}</div>}
+    </form>
+  );
+}
+
+function ManageLeagues({ leagues, deleteEnabled, onChanged }) {
+  const [editingSlug, setEditingSlug] = useState(null); // "<slug>:rename" | "<slug>:delete" | null
+
+  if (!leagues || leagues.length === 0) return null;
+
+  return (
+    <div className="panel" style={{ maxWidth: 520, marginTop: 20 }}>
+      <h2>Manage Leagues</h2>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {leagues.map((league) => {
+          const editing = editingSlug === `${league.slug}:rename` ? "rename" : editingSlug === `${league.slug}:delete` ? "delete" : null;
+          return (
+            <div key={league.slug} style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+              {editing === "rename" ? (
+                <RenameForm
+                  league={league}
+                  onCancel={() => setEditingSlug(null)}
+                  onDone={() => {
+                    setEditingSlug(null);
+                    onChanged();
+                  }}
+                />
+              ) : editing === "delete" ? (
+                <DeleteForm
+                  league={league}
+                  onCancel={() => setEditingSlug(null)}
+                  onDone={() => {
+                    setEditingSlug(null);
+                    onChanged();
+                  }}
+                />
+              ) : (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div>
+                    <strong>{league.displayName || league.slug}</strong>{" "}
+                    <span style={{ color: "var(--text-dim)", fontSize: 12 }}>({league.platform})</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button type="button" className="week-chip" onClick={() => setEditingSlug(`${league.slug}:rename`)}>
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      className="week-chip"
+                      onClick={() => setEditingSlug(`${league.slug}:delete`)}
+                      disabled={!deleteEnabled}
+                      title={!deleteEnabled ? "League deletion isn't enabled on this deployment" : undefined}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function AddLeaguePage() {
-  const { data: config } = useJson("/api/leagues");
+  const { data: config, refetch } = useJson("/api/leagues");
   const [platform, setPlatform] = useState("sleeper");
   const [result, setResult] = useState(null);
 
@@ -242,7 +398,14 @@ export default function AddLeaguePage() {
           minutes during the season, or sooner if the site owner triggers one manually) and pulls
           its {result.years ? `${result.years.join(", ")} season(s)` : "full history"} automatically.
         </p>
-        <button type="button" className="week-chip" onClick={() => setResult(null)}>
+        <button
+          type="button"
+          className="week-chip"
+          onClick={() => {
+            setResult(null);
+            refetch();
+          }}
+        >
           Add another
         </button>
       </div>
@@ -250,29 +413,33 @@ export default function AddLeaguePage() {
   }
 
   return (
-    <div className="panel" style={{ maxWidth: 520 }}>
-      <h2>Add a League</h2>
+    <>
+      <div className="panel" style={{ maxWidth: 520 }}>
+        <h2>Add a League</h2>
 
-      <div className="controls" style={{ marginBottom: 16 }}>
-        <button
-          type="button"
-          className={`week-chip${platform === "sleeper" ? " selected" : ""}`}
-          onClick={() => setPlatform("sleeper")}
-        >
-          Sleeper
-        </button>
-        <button
-          type="button"
-          className={`week-chip${platform === "espn" ? " selected" : ""}`}
-          onClick={() => setPlatform("espn")}
-          disabled={config && !config.espnEnabled}
-          title={config && !config.espnEnabled ? "ESPN self-service isn't enabled on this deployment" : undefined}
-        >
-          ESPN{config && !config.espnEnabled ? " (disabled)" : ""}
-        </button>
+        <div className="controls" style={{ marginBottom: 16 }}>
+          <button
+            type="button"
+            className={`week-chip${platform === "sleeper" ? " selected" : ""}`}
+            onClick={() => setPlatform("sleeper")}
+          >
+            Sleeper
+          </button>
+          <button
+            type="button"
+            className={`week-chip${platform === "espn" ? " selected" : ""}`}
+            onClick={() => setPlatform("espn")}
+            disabled={config && !config.espnEnabled}
+            title={config && !config.espnEnabled ? "ESPN self-service isn't enabled on this deployment" : undefined}
+          >
+            ESPN{config && !config.espnEnabled ? " (disabled)" : ""}
+          </button>
+        </div>
+
+        {platform === "sleeper" ? <SleeperForm onDone={setResult} /> : <EspnForm onDone={setResult} />}
       </div>
 
-      {platform === "sleeper" ? <SleeperForm onDone={setResult} /> : <EspnForm onDone={setResult} />}
-    </div>
+      <ManageLeagues leagues={config?.leagues} deleteEnabled={config?.deleteEnabled} onChanged={refetch} />
+    </>
   );
 }

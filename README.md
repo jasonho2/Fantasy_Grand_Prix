@@ -173,12 +173,12 @@ one league/season is skipped with a warning in the run's log instead of
 failing the whole job -- every other league/season still gets pulled and
 committed.
 
-## Adding leagues
+## Adding, renaming, and removing leagues
 
-Both platforms can be self-serviced through **+ Add League** in the nav,
-but ESPN is gated -- this site has no login, and the two platforms have
-very different risk profiles when it comes to accepting them from an
-anonymous form submission.
+Both platforms can be self-serviced through **Leagues** in the nav, but
+ESPN is gated -- this site has no login, and the two platforms have very
+different risk profiles when it comes to accepting them from an anonymous
+form submission.
 
 **Sleeper** -- fully open, no repo access or passphrase needed. Paste in a
 Sleeper league id and submit. That just registers the league (writes one
@@ -209,6 +209,21 @@ Either self-service path: Grand Prix contest windows aren't
 auto-detectable, so a self-service league won't have any until you add a
 `"contests"` entry for it in `config.json`.
 
+**Renaming and removing** a registered league both live in the "Manage
+Leagues" list below the add form on the same **Leagues** page. Renaming is
+purely cosmetic (just updates the display name shown in the league
+switcher) and is open the same way Sleeper self-service is -- nothing
+sensitive about picking a different label. Deleting is destructive and
+irreversible (every team, matchup, weekly score, and contest result for
+that league is gone for good) and this site still has no login to
+otherwise restrict "your own" league, so it reuses the same
+`ADD_LEAGUE_PASSPHRASE` gate as ESPN registration -- if that env var isn't
+set, deletion is disabled outright rather than accepting any passphrase.
+Both actions hit `PATCH`/`DELETE /api/leagues/<slug>`; deletion cascades
+through every league-scoped table but deliberately leaves the global
+`players` table alone, since a player row can be shared across multiple
+leagues on the same platform.
+
 ## Project layout
 
 - `pipeline.py` -- multi-league entrypoint: loops `config.json`'s `"leagues"`
@@ -236,12 +251,16 @@ auto-detectable, so a self-service league won't have any until you add a
   "5. Automate it" above).
 - `web/` -- Next.js dashboard.
   - `app/standings/`, `app/players/`, `app/matchups/`, `app/contests/` -- the four pages.
-  - `app/leagues/new/` -- self-service "Add a League" form (Sleeper only --
-    see "Adding leagues through the web UI" below).
+  - `app/leagues/new/` -- self-service "Add a League" form plus the "Manage
+    Leagues" rename/delete list (see "Adding, renaming, and removing
+    leagues" above).
   - `app/api/*/route.js` -- API routes that query the database, all scoped
     by a `?league=<slug>` param alongside `season`.
   - `app/api/leagues/route.js` -- handles the "Add a League" form
-    submission (registers a Sleeper league; doesn't pull any data itself).
+    submission (registers a league; doesn't pull any data itself) and lists
+    registered leagues for the "Manage Leagues" section.
+  - `app/api/leagues/[slug]/route.js` -- rename (`PATCH`, open) and delete
+    (`DELETE`, passphrase-gated, cascading) for an existing league.
   - `app/components/LeagueSelect.js` -- the league-switcher dropdown, hidden
     whenever fewer than two leagues are registered.
   - `lib/db.js` -- shared database client.

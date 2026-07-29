@@ -208,7 +208,17 @@ export async function POST(request) {
 
 // GET tells the form whether the ESPN path is even enabled on this
 // deployment, so it can hide/disable those fields instead of letting
-// someone fill out a form that can only ever 401.
+// someone fill out a form that can only ever 401. Also returns the current
+// league list, so the "Manage Leagues" section on the same page can list
+// rename/delete controls without a second round trip to /api/meta.
 export async function GET() {
-  return Response.json({ espnEnabled: Boolean(process.env.ADD_LEAGUE_PASSPHRASE) });
+  const leagues = await query(
+    "SELECT slug, display_name AS displayName, platform FROM leagues ORDER BY slug"
+  ).catch(() => []); // tolerate a not-yet-migrated DB that lacks the leagues table
+
+  return Response.json({
+    espnEnabled: Boolean(process.env.ADD_LEAGUE_PASSPHRASE),
+    deleteEnabled: Boolean(process.env.ADD_LEAGUE_PASSPHRASE),
+    leagues,
+  });
 }
