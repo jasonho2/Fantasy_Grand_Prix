@@ -289,6 +289,20 @@ def connect(db_path):
     """Connect to Turso if TURSO_DATABASE_URL is set in the environment,
     otherwise to a local SQLite file at db_path. Same schema, same API
     either way -- callers don't need to know which backend they got."""
+    # Deliberately distinguishes "the env var isn't set at all" (use local
+    # SQLite -- the normal local-dev case) from "the env var is set but
+    # empty" (fail loudly). The latter most commonly means a GitHub Actions
+    # secret that was never added -- ${{ secrets.X }} substitutes to an
+    # empty string, not a missing variable, so os.environ.get() alone can't
+    # tell those two cases apart, and silently falling back to a local
+    # SQLite file inside an ephemeral CI runner looks exactly like success
+    # (no error, exit code 0) while never actually touching Turso.
+    if "TURSO_DATABASE_URL" in os.environ and not os.environ["TURSO_DATABASE_URL"]:
+        raise RuntimeError(
+            "TURSO_DATABASE_URL is set but empty. If you don't want to use Turso, unset the "
+            "environment variable entirely instead of setting it to an empty string -- an empty "
+            "value most commonly means a GitHub Actions (or similar) secret that was never added."
+        )
     turso_url = os.environ.get("TURSO_DATABASE_URL")
 
     if turso_url:
