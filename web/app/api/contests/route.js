@@ -1,9 +1,9 @@
 import { query } from "@/lib/db";
 
-// Point-total side-contests within a season (e.g. weeks 1-4, 5-8, 9-12,
-// 13-17). Windows are configured per season in config.json and loaded into
-// the contest_windows table by the Python pipeline -- not hardcoded here,
-// since they can vary by season/commissioner.
+// Point-total side-contests within one league's season (e.g. weeks 1-4,
+// 5-8, 9-12, 13-17). Windows are configured per league in config.json and
+// loaded into the contest_windows table by the pipeline -- not hardcoded
+// here, since they can vary by league/season/commissioner.
 //
 // Scoring: Mario-Kart-style weekly placement points. Every week, ALL teams
 // in the league are ranked by that week's fantasy score (highest first);
@@ -14,7 +14,7 @@ import { query } from "@/lib/db";
 // sorted by summed placement points, not by fantasy points -- fantasy
 // points are still summed and returned per manager as a reference column.
 //
-// GET /api/contests?season=2025
+// GET /api/contests?league=<slug>&season=2025
 
 // Indexed by rank - 1 (rank 1 -> POINT_TABLE[0]). Sized for a 12-team
 // league; a team placing beyond this list scores 0.
@@ -25,18 +25,27 @@ function placementPoints(rank) {
 }
 
 export async function GET(request) {
-  const season = Number(new URL(request.url).searchParams.get("season"));
-  if (!season) {
-    return Response.json({ error: "season query param is required" }, { status: 400 });
+  const params = new URL(request.url).searchParams;
+  const season = Number(params.get("season"));
+  const league = params.get("league");
+  if (!season || !league) {
+    return Response.json({ error: "season and league query params are required" }, { status: 400 });
   }
 
-  const leagueRows = await query("SELECT league_name FROM leagues WHERE season = ?", [season]).catch(() => []);
-  const leagueName = leagueRows[0]?.league_name ?? null;
+  const nameRows = await query(
+    `SELECT COALESCE(l.display_name, ls.league_name) AS name
+     FROM leagues l LEFT JOIN league_seasons ls ON ls.league_id = l.league_id AND ls.season = ?
+     WHERE l.slug = ?`,
+    [season, league]
+  ).catch(() => []);
+  const leagueName = nameRows[0]?.name ?? null;
 
   const windows = await query(
-    `SELECT id AS contest_id, contest_name AS name, start_week, end_week, sort_order
-     FROM contest_windows WHERE season = ? ORDER BY sort_order`,
-    [season]
+    `SELECT cw.id AS contest_id, cw.contest_name AS name, cw.start_week, cw.end_week, cw.sort_order
+     FROM contest_windows cw
+     WHERE cw.season = ? AND cw.league_id = (SELECT league_id FROM leagues WHERE slug = ?)
+     ORDER BY cw.sort_order`,
+    [season, league]
   );
 
   const weeklyRows = await query(
@@ -44,9 +53,9 @@ export async function GET(request) {
      FROM weekly_manager_points wmp
      JOIN teams t ON t.team_id = wmp.team_id
      JOIN managers m ON m.manager_id = t.manager_id
-     WHERE wmp.season = ?
+     WHERE wmp.season = ? AND t.league_id = (SELECT league_id FROM leagues WHERE slug = ?)
      ORDER BY wmp.week, wmp.points DESC`,
-    [season]
+    [season, league]
   );
 
   // A manager maps to exactly one team for the season -- grab that mapping

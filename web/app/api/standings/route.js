@@ -1,20 +1,25 @@
 import { query } from "@/lib/db";
 
-// Standings table (wins/losses/points) + weekly trend series, for one season.
-// Scoped to the regular season (weeks 1..regular_season_weeks) -- playoff
-// weeks are returned separately as playoffWeekly rather than folded into
-// the same standings/trend, since fantasy playoff results don't count
-// toward the overall record the same way regular-season games do.
-// GET /api/standings?season=2025
+// Standings table (wins/losses/points) + weekly trend series, for one
+// league's season. Scoped to the regular season (weeks 1..regular_season_weeks)
+// -- playoff weeks are returned separately as playoffWeekly rather than
+// folded into the same standings/trend, since fantasy playoff results
+// don't count toward the overall record the same way regular-season games
+// do.
+// GET /api/standings?league=<slug>&season=2025
 export async function GET(request) {
-  const season = Number(new URL(request.url).searchParams.get("season"));
-  if (!season) {
-    return Response.json({ error: "season query param is required" }, { status: 400 });
+  const params = new URL(request.url).searchParams;
+  const season = Number(params.get("season"));
+  const league = params.get("league");
+  if (!season || !league) {
+    return Response.json({ error: "season and league query params are required" }, { status: 400 });
   }
 
   const leagueRows = await query(
-    "SELECT regular_season_weeks FROM leagues WHERE season = ?",
-    [season]
+    `SELECT ls.regular_season_weeks FROM league_seasons ls
+     JOIN leagues l ON l.league_id = ls.league_id
+     WHERE l.slug = ? AND ls.season = ?`,
+    [league, season]
   ).catch(() => []);
   // No configured cutoff -- treat every played week as "regular season"
   // rather than silently hiding weeks nobody told us were playoffs.
@@ -48,10 +53,10 @@ export async function GET(request) {
      FROM sides s
      JOIN teams t ON t.team_id = s.team_id
      JOIN managers m ON m.manager_id = t.manager_id
-     WHERE s.season = ? AND s.week <= ?
+     WHERE s.season = ? AND s.week <= ? AND t.league_id = (SELECT league_id FROM leagues WHERE slug = ?)
      GROUP BY s.team_id
      ORDER BY wins DESC, points_for DESC`,
-    [season, sqlWeekCutoff]
+    [season, sqlWeekCutoff, league]
   );
 
   const allWeekly = await query(
@@ -59,9 +64,9 @@ export async function GET(request) {
      FROM weekly_manager_points wmp
      JOIN teams t ON t.team_id = wmp.team_id
      JOIN managers m ON m.manager_id = t.manager_id
-     WHERE t.season = ?
+     WHERE t.season = ? AND t.league_id = (SELECT league_id FROM leagues WHERE slug = ?)
      ORDER BY wmp.week, team`,
-    [season]
+    [season, league]
   );
 
   const weekly = allWeekly.filter((r) => r.week <= regularSeasonWeeks);

@@ -13,6 +13,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import SeasonSelect from "../components/SeasonSelect";
+import LeagueSelect from "../components/LeagueSelect";
 import { useJson } from "../../lib/useJson";
 
 const COLORS = [
@@ -35,12 +36,18 @@ function pivotWeekly(weekly) {
 function StandingsInner() {
   const searchParams = useSearchParams();
   const season = searchParams.get("season");
+  const league = searchParams.get("league");
 
-  const { data: meta } = useJson("/api/meta");
+  const { data: meta } = useJson(`/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`);
   const seasons = meta?.seasons || [];
   const activeSeason = season || seasons[0];
+  const activeLeague = league || meta?.league;
 
-  const { data, loading, error } = useJson(activeSeason ? `/api/standings?season=${activeSeason}` : null);
+  const { data, loading, error } = useJson(
+    activeSeason && activeLeague
+      ? `/api/standings?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}`
+      : null
+  );
 
   // null = default sort (best win-loss record, points_for as tiebreaker).
   // Clicking a column header switches to sorting by that column alone.
@@ -110,6 +117,7 @@ function StandingsInner() {
   return (
     <>
       <div className="controls">
+        <LeagueSelect leagues={meta?.leagues} league={activeLeague} />
         <SeasonSelect seasons={seasons} season={activeSeason} />
         {selectedTeam && (
           <span style={{ fontSize: 14, color: "var(--text-dim)" }}>

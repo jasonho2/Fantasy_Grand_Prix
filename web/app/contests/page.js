@@ -3,6 +3,7 @@
 import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import SeasonSelect from "../components/SeasonSelect";
+import LeagueSelect from "../components/LeagueSelect";
 import { useJson } from "../../lib/useJson";
 
 const STATUS_LABEL = {
@@ -134,16 +135,23 @@ function ContestPanel({ contest }) {
 function ContestsInner() {
   const searchParams = useSearchParams();
   const season = searchParams.get("season");
+  const league = searchParams.get("league");
 
-  const { data: meta } = useJson("/api/meta");
+  const { data: meta } = useJson(`/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`);
   const seasons = meta?.seasons || [];
   const activeSeason = season || seasons[0];
+  const activeLeague = league || meta?.league;
 
-  const { data, loading, error } = useJson(activeSeason ? `/api/contests?season=${activeSeason}` : null);
+  const { data, loading, error } = useJson(
+    activeSeason && activeLeague
+      ? `/api/contests?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}`
+      : null
+  );
 
   return (
     <>
       <div className="controls">
+        <LeagueSelect leagues={meta?.leagues} league={activeLeague} />
         <SeasonSelect seasons={seasons} season={activeSeason} />
       </div>
 
