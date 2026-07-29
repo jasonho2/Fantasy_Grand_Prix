@@ -49,6 +49,32 @@ const CUP_ICONS = {
   "Special Cup": "\u{1F451}", // crown
 };
 
+// Movement vs. this cup's previous played week (see the contests API route
+// for how it's computed -- always against the placement-points rank,
+// regardless of whether the "Sort by" toggle below currently has fantasy
+// points selected instead). Nothing renders for a team that held its
+// spot, or before a second week has been played in this cup.
+function RankDelta({ delta }) {
+  if (!delta) return null;
+  const up = delta > 0;
+  const magnitude = Math.abs(delta);
+  return (
+    <span
+      title={`${up ? "Up" : "Down"} ${magnitude} spot${magnitude === 1 ? "" : "s"} vs last week`}
+      style={{
+        marginLeft: 6,
+        fontSize: 11,
+        fontWeight: 700,
+        color: up ? "var(--win)" : "var(--loss)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {up ? "▲" : "▼"}
+      {magnitude}
+    </span>
+  );
+}
+
 function ContestPanel({ contest }) {
   // Descending only, per spec -- just which column, not direction.
   const [sortBy, setSortBy] = useState("contest_points");
@@ -111,6 +137,7 @@ function ContestPanel({ contest }) {
                   <span className="wrap-cell" style={{ display: "inline-block", verticalAlign: "middle" }}>
                     {row.team}
                   </span>
+                  <RankDelta delta={row.rankDelta} />
                   {row.displayRank === 1 && (
                     <span className="badge win" style={{ marginLeft: 6 }}>
                       Leader

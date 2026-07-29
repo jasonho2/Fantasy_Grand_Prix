@@ -84,26 +84,57 @@ export async function GET(request) {
     });
   }
 
-  const contests = windows.map((w) => {
-    const contestWeeks = [];
-    for (let wk = w.start_week; wk <= w.end_week; wk++) contestWeeks.push(wk);
-
-    const inWindow = ranked.filter((r) => r.week >= w.start_week && r.week <= w.end_week);
-
-    // manager -> { contest_points, fantasy_points, byWeek: { week: placement_points } }
+  // Sums a set of ranked rows into manager -> cumulative { contest_points,
+  // fantasy_points }, the same reduction used for both the real leaderboard
+  // and the "as of last week" snapshot used for rank-movement arrows below.
+  function sumByManager(rows) {
     const totals = new Map();
-    for (const r of inWindow) {
-      if (!totals.has(r.manager)) {
-        totals.set(r.manager, { contest_points: 0, fantasy_points: 0, byWeek: {} });
-      }
+    for (const r of rows) {
+      if (!totals.has(r.manager)) totals.set(r.manager, { contest_points: 0, fantasy_points: 0, byWeek: {} });
       const t = totals.get(r.manager);
       t.contest_points += r.placement_points;
       t.fantasy_points += r.points;
       t.byWeek[r.week] = r.placement_points;
     }
+    return totals;
+  }
+
+  // Same tiebreak the real leaderboard is sorted by (contest/placement
+  // points, fantasy points as the tiebreaker) -- rank movement has to be
+  // measured against that order, not whichever sort the "Sort by" toggle
+  // happens to have selected client-side.
+  function rankByContestPoints(totals) {
+    const sorted = [...totals.entries()].sort(
+      (a, b) => b[1].contest_points - a[1].contest_points || b[1].fantasy_points - a[1].fantasy_points
+    );
+    const ranks = new Map();
+    sorted.forEach(([manager], i) => ranks.set(manager, i + 1));
+    return ranks;
+  }
+
+  const contests = windows.map((w) => {
+    const contestWeeks = [];
+    for (let wk = w.start_week; wk <= w.end_week; wk++) contestWeeks.push(wk);
+
+    const inWindow = ranked.filter((r) => r.week >= w.start_week && r.week <= w.end_week);
+    const playedWeeksInWindow = [...new Set(inWindow.map((r) => r.week))].sort((a, b) => a - b);
+    const latestPlayedWeek = playedWeeksInWindow[playedWeeksInWindow.length - 1];
+
+    const totals = sumByManager(inWindow);
+    const currentRanks = rankByContestPoints(totals);
+
+    // Rank movement within this cup vs. the previous played week -- not
+    // the previous week overall, since a cup only spans its own weeks.
+    // Needs at least two played weeks in the window to have a "before".
+    let previousRanks = new Map();
+    if (playedWeeksInWindow.length >= 2) {
+      const priorRows = inWindow.filter((r) => r.week < latestPlayedWeek);
+      previousRanks = rankByContestPoints(sumByManager(priorRows));
+    }
 
     const leaderboard = [...totals.entries()]
       .map(([manager, t]) => ({
+        manager,
         team: managerTeam.get(manager) ?? manager,
         contest_points: t.contest_points,
         fantasy_points: Number(t.fantasy_points.toFixed(2)),
@@ -112,7 +143,17 @@ export async function GET(request) {
       // Sort by contest (placement) points, not fantasy points. Fantasy
       // points only break ties.
       .sort((a, b) => b.contest_points - a.contest_points || b.fantasy_points - a.fantasy_points)
-      .map((row, i) => ({ rank: i + 1, ...row }));
+      .map(({ manager, ...row }, i) => {
+        const rank = i + 1;
+        const previousRank = previousRanks.get(manager) ?? null;
+        return {
+          rank,
+          // Positive = moved up (a lower rank number is better); null = no
+          // earlier played week in this cup to compare against yet.
+          rankDelta: previousRank != null ? previousRank - rank : null,
+          ...row,
+        };
+      });
 
     return {
       name: w.name,
