@@ -120,6 +120,11 @@ season).
 3. Add environment variables in the Vercel project settings:
    - `DATABASE_URL` = your `libsql://...` URL from `turso db show`
    - `DATABASE_AUTH_TOKEN` = your token from `turso db tokens create`
+   - `ADD_LEAGUE_PASSPHRASE` (optional) = a passphrase of your choosing.
+     Enables the ESPN path on the site's "Add a League" form, gated behind
+     this passphrase (see "Adding leagues" below). Leave unset to disable
+     ESPN self-service entirely -- Sleeper self-service works either way,
+     it doesn't use this.
 4. Deploy. Vercel rebuilds automatically on every push to `main`.
 
 Because the site queries Turso live on each request, you do **not** need to
@@ -170,26 +175,39 @@ committed.
 
 ## Adding leagues
 
-Two ways, depending on the platform:
+Both platforms can be self-serviced through **+ Add League** in the nav,
+but ESPN is gated -- this site has no login, and the two platforms have
+very different risk profiles when it comes to accepting them from an
+anonymous form submission.
 
-**Sleeper** -- self-service, no repo access needed. Anyone can go to
-**+ Add League** in the nav, paste in a Sleeper league id, and submit. That
-just registers the league (writes one row to the database); the next
-scheduled pipeline run (or a manually triggered one, see "5. Automate it")
-picks it up automatically and pulls its *entire* history -- every season
-back to when the league started, discovered via Sleeper's own season-chain
-metadata, no need to specify which years. The regular-season length is
-similarly auto-detected from Sleeper's own playoff-start setting. This is
-deliberately Sleeper-only: the site has no login, and Sleeper's API needs no
-credentials at all, so there's nothing sensitive in that form. Grand Prix
-contest windows aren't auto-detectable, so a self-service league won't have
-any until you add a `"contests"` entry for it in `config.json`.
+**Sleeper** -- fully open, no repo access or passphrase needed. Paste in a
+Sleeper league id and submit. That just registers the league (writes one
+row to the database); the next scheduled pipeline run (or a manually
+triggered one, see "5. Automate it") picks it up automatically and pulls
+its *entire* history -- every season back to when the league started,
+discovered via Sleeper's own season-chain metadata, no need to specify
+which years. The regular-season length is similarly auto-detected from
+Sleeper's own playoff-start setting. This is safe to leave fully open
+because Sleeper's API needs no credentials at all -- there's nothing
+sensitive in that form.
 
-**ESPN** -- still requires editing `config.json` and rerunning the pipeline
-(or adding it to the automated workflow's secrets), since it needs real
-`espn_s2`/`SWID` cookies -- credentials this site intentionally never
-accepts through an open, unauthenticated web form. See "1. Pull data" above
-for the config shape.
+**ESPN** -- needs real `espn_s2`/`SWID` cookies, which *is* sensitive, so
+the form's ESPN tab is gated behind the `ADD_LEAGUE_PASSPHRASE` env var
+(see "4. Deploy the frontend"). If that env var isn't set, the ESPN tab is
+disabled entirely rather than silently accepting any passphrase. With the
+right passphrase, the form validates the league id/cookies against ESPN's
+real API before storing anything, then registers it the same way Sleeper
+does -- except years have to be given explicitly (e.g. `2024-2026`,
+defaults to the current year if left blank), since ESPN has no
+season-chain to auto-walk the way Sleeper does. You can still add ESPN
+leagues the old way too -- editing `config.json` directly and rerunning
+the pipeline (or adding it to the automated workflow's secrets) -- which
+skips the passphrase and gets you `years`/`regular_season_weeks`/contest
+window config all in one place. See "1. Pull data" above for that shape.
+
+Either self-service path: Grand Prix contest windows aren't
+auto-detectable, so a self-service league won't have any until you add a
+`"contests"` entry for it in `config.json`.
 
 ## Project layout
 
@@ -267,16 +285,16 @@ and rerunning is all it takes to change a window's boundaries.
 ## Notes / known limitations
 
 - There's still no login on this site -- anyone with the URL can view every
-  registered league and use the self-service "Add a League" form. That form
-  is Sleeper-only specifically because of this (see "Adding leagues"
-  above); if this ever needs to be locked down further (e.g. before sharing
-  the URL widely), that's an auth layer to add on top, not a rework of
-  what's here.
-- Each pipeline run merges two sources of leagues: `config.json`'s list
-  (the only place ESPN credentials can live) and any Sleeper leagues
-  already registered in the database that config.json doesn't already
-  cover (i.e. ones added through the web form). A league present in both
-  is only pulled once, via its config.json entry.
+  registered league and use the self-service "Add a League" form. Sleeper's
+  side of that form is fully open (nothing sensitive to protect); ESPN's
+  side is passphrase-gated (see "Adding leagues" above), which is a
+  deliberately lightweight speed bump, not real auth -- if this ever needs
+  to be locked down further (e.g. before sharing the URL widely), that's an
+  auth layer to add on top, not a rework of what's here.
+- Each pipeline run merges two sources of leagues: `config.json`'s list and
+  any leagues already registered in the database that config.json doesn't
+  already cover (i.e. added through the web form, either platform). A
+  league present in both is only pulled once, via its config.json entry.
 - Sleeper's per-player weekly points are an approximation (closest of
   standard/half-PPR/full-PPR to the league's actual reception scoring --
   see the comment at the top of `platforms/sleeper.py`), since Sleeper's

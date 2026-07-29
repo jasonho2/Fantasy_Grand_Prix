@@ -5,23 +5,29 @@ interface each platform module implements).
 
 Two sources of leagues to pull, merged on every run:
 
-1. config.json's "leagues" list -- the trusted source, since it's the only
-   one that can carry ESPN credentials (there's no login on this site, so
-   accepting ESPN cookies through an open web form would let anyone who
-   finds the URL submit credentials that get stored and used by the
-   automated pipeline; config.json is only editable by whoever has repo
-   access). See config.example.json for the shape.
+1. config.json's "leagues" list -- editable only by whoever has repo
+   access. See config.example.json for the shape.
 2. Self-service leagues registered through the web UI's "Add a League"
    form (web/app/api/leagues/route.js), stored directly in the `leagues`
-   table. Restricted to Sleeper only, for the reason above -- Sleeper's API
-   is public read-only and needs no credentials at all, so there's nothing
-   sensitive being accepted from an anonymous visitor. These leagues have
-   no config.json entry, so their years and regular-season length are
-   auto-discovered (platforms.sleeper.resolve_years walks the whole
-   previous_league_id chain when given no explicit years; regular season
-   length comes from Sleeper's own playoff_week_start setting) and they get
-   no Grand Prix contest windows (nothing to auto-detect there -- add them
-   later by giving the league a config.json entry if wanted).
+   table. These leagues have no config.json entry, so whatever isn't
+   auto-detectable falls back to a sensible default instead of being
+   required up front:
+     - Sleeper: years and regular-season length are auto-discovered
+       (platforms.sleeper.resolve_years walks the whole previous_league_id
+       chain when given no explicit years; regular season length comes
+       from Sleeper's own playoff_week_start setting). Sleeper's form path
+       is fully open -- its API is public read-only and needs no
+       credentials, so there's nothing sensitive being accepted from an
+       anonymous visitor.
+     - ESPN: needs real credentials, so its form path is gated behind a
+       shared passphrase (see web/app/api/leagues/route.js) -- unlike
+       Sleeper, ESPN has no season-chain to auto-walk, so the years to
+       pull are set explicitly at registration time and stored in
+       `leagues.pull_years` (falls back to just the current year if
+       somehow missing).
+   Neither self-service path gets Grand Prix contest windows -- nothing to
+   auto-detect there; add them later by giving the league a config.json
+   entry if wanted.
 
 For each league (whichever source it came from):
   1. Registers/updates it in the `leagues` table (db.get_or_create_league)
@@ -49,6 +55,7 @@ Usage
 import argparse
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 import db as db_module
@@ -164,24 +171,50 @@ def run_pipeline(leagues_config, sqlite_path):
         if league_cfg.get("slug"):
             processed_slugs.add(league_cfg["slug"])
 
-    # Self-service leagues added through the web UI's "Add a League" form
-    # (Sleeper only -- see module docstring). Anything already covered by
-    # config.json is skipped here to avoid pulling it twice.
+    # Self-service leagues added through the web UI's "Add a League" form.
+    # Anything already covered by config.json is skipped here to avoid
+    # pulling it twice. Sleeper needs nothing beyond its league id (years
+    # auto-discovered via the previous_league_id chain, same as any
+    # config.json Sleeper entry that omits "years"). ESPN self-service
+    # leagues carry their own credentials and an explicit `pull_years`
+    # (JSON array) set by the API route at registration time, since ESPN
+    # has no season-chain to auto-walk the way Sleeper does -- fall back to
+    # the current year if that's somehow missing rather than silently
+    # pulling nothing.
     try:
         rows = conn.execute(
-            "SELECT slug, sleeper_league_id FROM leagues WHERE platform = 'sleeper'"
+            "SELECT slug, platform, sleeper_league_id, espn_league_id, espn_s2, espn_swid, pull_years "
+            "FROM leagues WHERE platform IN ('sleeper', 'espn')"
         ).fetchall()
     except Exception as exc:  # noqa: BLE001 -- don't let a query hiccup abort config-driven leagues above
-        print(f"Could not list self-service Sleeper leagues: {exc}", file=sys.stderr)
+        print(f"Could not list self-service leagues: {exc}", file=sys.stderr)
         rows = []
 
-    for slug, sleeper_league_id in rows:
-        if slug in processed_slugs or not sleeper_league_id:
+    for slug, platform, sleeper_league_id, espn_league_id, espn_s2, espn_swid, pull_years_json in rows:
+        if slug in processed_slugs:
             continue
-        _pull_one_league(
-            conn,
-            {"slug": slug, "platform": "sleeper", "sleeper_league_id": sleeper_league_id},
-        )
+        if platform == "sleeper":
+            if not sleeper_league_id:
+                continue
+            league_cfg = {"slug": slug, "platform": "sleeper", "sleeper_league_id": sleeper_league_id}
+        elif platform == "espn":
+            if not espn_league_id:
+                continue
+            try:
+                years = json.loads(pull_years_json) if pull_years_json else []
+            except (TypeError, ValueError):
+                years = []
+            league_cfg = {
+                "slug": slug,
+                "platform": "espn",
+                "espn_league_id": espn_league_id,
+                "espn_s2": espn_s2 or "",
+                "espn_swid": espn_swid or "",
+                "years": years or [date.today().year],
+            }
+        else:
+            continue
+        _pull_one_league(conn, league_cfg)
 
     conn.close()
 

@@ -93,6 +93,12 @@ CREATE TABLE IF NOT EXISTS leagues (
     sleeper_league_id TEXT,              -- Sleeper only -- that league's CURRENT/most recent season id,
                                           -- earlier seasons are resolved by walking previous_league_id
                                           -- and cached per-season in league_seasons.external_id
+    pull_years TEXT,                     -- JSON array of years, e.g. "[2024,2025]". Only meaningful for
+                                          -- ESPN leagues registered through the self-service web form --
+                                          -- ESPN has no season-chain to auto-walk the way Sleeper does, so
+                                          -- self-service ESPN leagues need an explicit year list from
+                                          -- somewhere; config.json-defined leagues ignore this column
+                                          -- entirely and use their own "years" list instead.
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -261,6 +267,24 @@ def _migrate_legacy_single_league_schema(conn):
     conn.commit()
 
 
+# Columns added to a table after it first shipped under the current
+# (multi-league) schema. "CREATE TABLE IF NOT EXISTS" is a no-op once the
+# table already exists, so adding a column to SCHEMA_SQL alone does nothing
+# for databases created before that change -- this list is the migration
+# path for those. Safe to run every connect(): each entry is only applied
+# if the column is actually missing.
+COLUMN_MIGRATIONS = [
+    ("leagues", "pull_years", "TEXT"),
+]
+
+
+def _apply_column_migrations(conn):
+    for table, column, coltype in COLUMN_MIGRATIONS:
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+
+
 def connect(db_path):
     """Connect to Turso if TURSO_DATABASE_URL is set in the environment,
     otherwise to a local SQLite file at db_path. Same schema, same API
@@ -291,6 +315,7 @@ def connect(db_path):
     _migrate_legacy_single_league_schema(conn)
     for statement in _split_statements(SCHEMA_SQL):
         conn.execute(statement)
+    _apply_column_migrations(conn)
     return conn
 
 
