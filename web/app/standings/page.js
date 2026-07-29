@@ -33,31 +33,6 @@ function pivotWeekly(weekly) {
   return { teams, rows };
 }
 
-// Movement vs. last week's standings rank (see the standings API route for
-// how it's computed -- always against the record-based rank, regardless of
-// which column this table is currently sorted by). Nothing renders for a
-// team that held its spot, or for week 1 where there's no prior week yet.
-function RankDelta({ delta }) {
-  if (!delta) return null;
-  const up = delta > 0;
-  const magnitude = Math.abs(delta);
-  return (
-    <span
-      title={`${up ? "Up" : "Down"} ${magnitude} spot${magnitude === 1 ? "" : "s"} vs last week`}
-      style={{
-        marginLeft: 6,
-        fontSize: 11,
-        fontWeight: 700,
-        color: up ? "var(--win)" : "var(--loss)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {up ? "▲" : "▼"}
-      {magnitude}
-    </span>
-  );
-}
-
 function StandingsInner() {
   const [league, setLeague] = useUrlState("league");
   const [season, setSeason] = useUrlState("season");
@@ -195,7 +170,6 @@ function StandingsInner() {
                         style={{ background: selectedTeam === row.team ? "#1f2a3c" : undefined }}
                       >
                         {row.team}
-                        <RankDelta delta={row.rankDelta} />
                       </td>
                       <td>{row.wins}</td>
                       <td>{row.losses}</td>
