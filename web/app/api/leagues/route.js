@@ -186,10 +186,24 @@ async function handleEspn(body) {
 
 export async function POST(request) {
   const body = await request.json().catch(() => null);
-  if (body?.platform === "espn") {
-    return handleEspn(body);
+  try {
+    if (body?.platform === "espn") {
+      return await handleEspn(body);
+    }
+    return await handleSleeper(body);
+  } catch (err) {
+    // Anything unhandled below (most commonly: the database isn't reachable
+    // yet, or is missing a column this route expects -- see the comment on
+    // db.py's COLUMN_MIGRATIONS, which only gets applied when the Python
+    // pipeline connects, not by this route) would otherwise surface as a
+    // bare 500 with no JSON body, which the form can only report as a
+    // generic "Request failed". Surface the real reason instead.
+    console.error("POST /api/leagues failed:", err);
+    return Response.json(
+      { error: `Something went wrong registering the league: ${err.message || err}` },
+      { status: 500 }
+    );
   }
-  return handleSleeper(body);
 }
 
 // GET tells the form whether the ESPN path is even enabled on this
