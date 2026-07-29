@@ -18,6 +18,10 @@ export default function LeagueSelect({ leagues, league }) {
     // latest season instead of possibly pointing at one it doesn't have.
     params.delete("season");
     router.push(`${pathname}?${params.toString()}`);
+    // See the matching comment in SeasonSelect.js -- same router-cache
+    // workaround, same symptom (works after any other navigation, not on
+    // a cold first load).
+    router.refresh();
   }
 
   if (!leagues || leagues.length < 2) return null;
