@@ -76,13 +76,21 @@ function RankDelta({ delta }) {
 }
 
 function ContestPanel({ contest }) {
+  // Which ranking to show: Solo (each team ranked individually every week)
+  // or Double Dash (that week's real head-to-head matchup pairs combine
+  // scores and get ranked as a pair -- see the contests API route for the
+  // full scoring rules). Independent of the Sort by toggle below, which
+  // only changes display order within whichever mode is selected.
+  const [mode, setMode] = useState("solo");
   // Descending only, per spec -- just which column, not direction.
   const [sortBy, setSortBy] = useState("contest_points");
 
+  const modeLeaderboard = mode === "solo" ? contest.leaderboard : contest.doubleDashLeaderboard;
+
   const sortedLeaderboard = useMemo(() => {
-    const rows = [...contest.leaderboard].sort((a, b) => b[sortBy] - a[sortBy]);
+    const rows = [...modeLeaderboard].sort((a, b) => b[sortBy] - a[sortBy]);
     return rows.map((row, i) => ({ ...row, displayRank: i + 1 }));
-  }, [contest.leaderboard, sortBy]);
+  }, [modeLeaderboard, sortBy]);
 
   const Icon = CUP_ICONS[contest.name];
 
@@ -97,6 +105,25 @@ function ContestPanel({ contest }) {
         {contest.name} (Weeks {contest.start_week}-{contest.end_week}){" "}
         <span className={`badge ${STATUS_BADGE_CLASS[contest.status]}`}>{STATUS_LABEL[contest.status]}</span>
       </h2>
+
+      <div className="controls" style={{ marginBottom: 8 }}>
+        <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Mode:</span>
+        <button
+          type="button"
+          className={`week-chip${mode === "solo" ? " selected" : ""}`}
+          onClick={() => setMode("solo")}
+        >
+          Solo
+        </button>
+        <button
+          type="button"
+          className={`week-chip${mode === "doubleDash" ? " selected" : ""}`}
+          onClick={() => setMode("doubleDash")}
+          title="This week's actual matchup pairs combine scores and get ranked as a pair -- both teammates score the same placement points."
+        >
+          Double Dash
+        </button>
+      </div>
 
       <div className="controls" style={{ marginBottom: 12 }}>
         <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Sort by:</span>
@@ -203,11 +230,14 @@ function ContestsInner() {
         {data?.leagueName ? `${data.leagueName} Grand Prix` : "Grand Prix"}
       </h1>
       <p style={{ color: "var(--text-dim)", fontSize: 14, marginTop: 0, marginBottom: 20 }}>
-        Each week, every team is ranked by that week&apos;s fantasy score and earns placement
-        points (1st: 12, 2nd: 10, 3rd: 9, down to last: 0). Placement points accumulate within a
-        cup&apos;s weeks and determine the ranking below by default; use the sort toggle on each
-        cup to rank by total fantasy points instead. Fantasy points are otherwise shown for
-        reference only.
+        Each cup has two modes. Solo ranks every team individually each week by that week&apos;s
+        fantasy score, earning placement points (1st: 12, 2nd: 10, 3rd: 9, down to last: 0). Double
+        Dash pairs up that week&apos;s actual head-to-head matchups instead -- both teams&apos;
+        scores are combined, every pair in the league is ranked against each other, and both
+        teammates earn the full placement points for wherever their pair landed (1st: 12, 2nd: 10,
+        3rd: 9, 4th: 8, 5th: 7, 6th: 5). Either way, placement points accumulate within a cup&apos;s
+        weeks and determine the ranking below by default; use the sort toggle on each cup to rank
+        by total fantasy points instead, which is otherwise shown for reference only.
       </p>
 
       {loading && <div className="loading-state">Loading contests...</div>}

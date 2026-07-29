@@ -5,23 +5,37 @@ import { query } from "@/lib/db";
 // loaded into the contest_windows table by the pipeline -- not hardcoded
 // here, since they can vary by league/season/commissioner.
 //
-// Scoring: Mario-Kart-style weekly placement points. Every week, ALL teams
-// in the league are ranked by that week's fantasy score (highest first);
-// rank determines placement points for that week via POINT_TABLE below.
-// Placement points accumulate cumulatively across a contest window's weeks
-// (ranking itself is recomputed fresh each week from that week's raw score,
-// not from a running fantasy-point total). A contest's leaderboard is
-// sorted by summed placement points, not by fantasy points -- fantasy
-// points are still summed and returned per manager as a reference column.
+// Two scoring modes, both Mario-Kart-style weekly placement points that
+// accumulate cumulatively across a contest window's weeks (each week's
+// ranking is recomputed fresh from that week's raw score, not a running
+// total), and both sorted by summed placement points with fantasy points
+// only as a reference/tiebreak column:
+//
+// - Solo: every team in the league is individually ranked by that week's
+//   fantasy score. Placement points via POINT_TABLE.
+// - Double Dash: this week's actual head-to-head matchup pairs form Mario-
+//   Kart-Double-Dash-style teams -- both teams' scores are summed into one
+//   combined score, every pair in the league is ranked by that combined
+//   score, and BOTH members of a pair receive the full placement points
+//   for wherever the pair landed (via DOUBLE_DASH_POINT_TABLE). A team on
+//   a bye has no partner that week, so it sits out of Double Dash scoring
+//   entirely for that week (shown the same as an unplayed week).
 //
 // GET /api/contests?league=<slug>&season=2025
 
 // Indexed by rank - 1 (rank 1 -> POINT_TABLE[0]). Sized for a 12-team
 // league; a team placing beyond this list scores 0.
 const POINT_TABLE = [12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+// Double Dash pairs up a 12-team league into 6 pairs, so only 6 placements
+// exist most weeks; a pair placing beyond this list scores 0.
+const DOUBLE_DASH_POINT_TABLE = [12, 10, 9, 8, 7, 5];
 
 function placementPoints(rank) {
   return rank - 1 < POINT_TABLE.length ? POINT_TABLE[rank - 1] : 0;
+}
+
+function placementPointsDoubleDash(rank) {
+  return rank - 1 < DOUBLE_DASH_POINT_TABLE.length ? DOUBLE_DASH_POINT_TABLE[rank - 1] : 0;
 }
 
 export async function GET(request) {
@@ -84,6 +98,54 @@ export async function GET(request) {
     });
   }
 
+  // Double Dash: pair each week's actual head-to-head matchup into one
+  // combined-score "team", rank pairs against every other pair in the
+  // league that week, and give BOTH members that placement's points --
+  // each still keeps their own individual fantasy score as their
+  // reference column, only the placement points come from the pair.
+  const matchupRows = await query(
+    `SELECT mu.week,
+            hm.manager_name AS home_manager, mu.home_points AS home_points,
+            am.manager_name AS away_manager, mu.away_points AS away_points,
+            mu.is_bye AS is_bye
+     FROM matchups mu
+     JOIN teams ht ON ht.team_id = mu.home_team_id
+     JOIN managers hm ON hm.manager_id = ht.manager_id
+     LEFT JOIN teams at ON at.team_id = mu.away_team_id
+     LEFT JOIN managers am ON am.manager_id = at.manager_id
+     WHERE mu.season = ? AND mu.league_id = (SELECT league_id FROM leagues WHERE slug = ?)
+     ORDER BY mu.week`,
+    [season, league]
+  );
+
+  const pairsByWeek = new Map(); // week -> [{ pairScore, members: [{manager, points}, ...] }]
+  for (const row of matchupRows) {
+    // A bye has no opponent to pair with -- sits out of Double Dash
+    // scoring for that week entirely (shows as an unplayed week, same as
+    // a cup window that hasn't reached this week yet).
+    if (row.is_bye || row.away_manager == null) continue;
+    if (!pairsByWeek.has(row.week)) pairsByWeek.set(row.week, []);
+    pairsByWeek.get(row.week).push({
+      pairScore: (row.home_points ?? 0) + (row.away_points ?? 0),
+      members: [
+        { manager: row.home_manager, points: row.home_points },
+        { manager: row.away_manager, points: row.away_points },
+      ],
+    });
+  }
+
+  const doubleDashRanked = []; // { week, manager, points, rank, placement_points }
+  for (const [week, pairs] of pairsByWeek) {
+    pairs.sort((a, b) => b.pairScore - a.pairScore);
+    pairs.forEach((pair, i) => {
+      const rank = i + 1;
+      const placement_points = placementPointsDoubleDash(rank);
+      for (const member of pair.members) {
+        doubleDashRanked.push({ week, manager: member.manager, points: member.points, rank, placement_points });
+      }
+    });
+  }
+
   // Sums a set of ranked rows into manager -> cumulative { contest_points,
   // fantasy_points }, the same reduction used for both the real leaderboard
   // and the "as of last week" snapshot used for rank-movement arrows below.
@@ -112,16 +174,20 @@ export async function GET(request) {
     return ranks;
   }
 
-  const contests = windows.map((w) => {
+  // Builds one mode's leaderboard for one contest window -- shared by Solo
+  // (fed `ranked`) and Double Dash (fed `doubleDashRanked`) below, since
+  // everything past "here are this window's ranked rows" (cumulative
+  // totals, sort, rank, rank-movement-vs-last-week) is identical between
+  // the two modes.
+  function buildLeaderboard(rankedRows, w) {
     const contestWeeks = [];
     for (let wk = w.start_week; wk <= w.end_week; wk++) contestWeeks.push(wk);
 
-    const inWindow = ranked.filter((r) => r.week >= w.start_week && r.week <= w.end_week);
+    const inWindow = rankedRows.filter((r) => r.week >= w.start_week && r.week <= w.end_week);
     const playedWeeksInWindow = [...new Set(inWindow.map((r) => r.week))].sort((a, b) => a - b);
     const latestPlayedWeek = playedWeeksInWindow[playedWeeksInWindow.length - 1];
 
     const totals = sumByManager(inWindow);
-    const currentRanks = rankByContestPoints(totals);
 
     // Rank movement within this cup vs. the previous played week -- not
     // the previous week overall, since a cup only spans its own weeks.
@@ -132,7 +198,7 @@ export async function GET(request) {
       previousRanks = rankByContestPoints(sumByManager(priorRows));
     }
 
-    const leaderboard = [...totals.entries()]
+    return [...totals.entries()]
       .map(([manager, t]) => ({
         manager,
         team: managerTeam.get(manager) ?? manager,
@@ -154,6 +220,11 @@ export async function GET(request) {
           ...row,
         };
       });
+  }
+
+  const contests = windows.map((w) => {
+    const contestWeeks = [];
+    for (let wk = w.start_week; wk <= w.end_week; wk++) contestWeeks.push(wk);
 
     return {
       name: w.name,
@@ -161,7 +232,8 @@ export async function GET(request) {
       end_week: w.end_week,
       weeks: contestWeeks,
       status: maxWeek >= w.end_week ? "final" : maxWeek >= w.start_week ? "in_progress" : "upcoming",
-      leaderboard,
+      leaderboard: buildLeaderboard(ranked, w),
+      doubleDashLeaderboard: buildLeaderboard(doubleDashRanked, w),
     };
   });
 
