@@ -174,6 +174,20 @@ function ContestsInner() {
       : null
   );
 
+  // Cups come back in chronological order (Mushroom -> Flower -> Star ->
+  // Special), which is right for the weeks *within* a cup but backwards for
+  // which cup you want to see first: the one currently being played, or
+  // the last one that finished once the season's over. Reverse the order
+  // and drop anything that hasn't started -- an "upcoming" cup with no
+  // games yet has nothing to show, and would otherwise sit at the top
+  // (since it's chronologically last) pushing the cup people actually care
+  // about down the page. As the season progresses, each newly-started cup
+  // takes over the top spot the same way.
+  const startedContests = useMemo(
+    () => (data?.contests || []).filter((c) => c.status !== "upcoming").reverse(),
+    [data]
+  );
+
   return (
     <>
       <div className="controls">
@@ -208,7 +222,17 @@ function ContestsInner() {
         </div>
       )}
 
-      {data && data.contests.map((contest) => <ContestPanel key={contest.name} contest={contest} />)}
+      {data && data.contests.length > 0 && startedContests.length === 0 && (
+        <div className="panel">
+          <div className="empty-state">
+            No cups have started yet this season -- check back once the first week wraps up.
+          </div>
+        </div>
+      )}
+
+      {startedContests.map((contest) => (
+        <ContestPanel key={contest.name} contest={contest} />
+      ))}
     </>
   );
 }
