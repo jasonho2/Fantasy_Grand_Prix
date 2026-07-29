@@ -63,23 +63,32 @@ def fetch_league(league_id):
 
 def resolve_years(conn, league_config, years):
     """Walk the previous_league_id chain starting from the league's current
-    (most recent) season id, and return {year: that season's league_id} for
-    every requested year found along the chain. A year with no matching
-    season in the chain (e.g. requested before the league existed) is
-    simply omitted -- pipeline.py treats a missing year as "skip"."""
+    (most recent) season id, and return {year: that season's league_id}.
+
+    If `years` is empty (e.g. a self-service league added through the web
+    UI, which only ever collects a single "current" league id and doesn't
+    ask the person to type out which years to pull), every season found in
+    the chain is returned -- there's nothing to filter against, and walking
+    the whole chain is exactly how you'd discover a league's full history
+    from just its current id. Otherwise, only the requested years are kept;
+    a requested year with no matching season in the chain (e.g. before the
+    league existed) is simply omitted -- pipeline.py treats a missing year
+    as "skip"."""
     start_id = league_config["sleeper_league_id"]
-    wanted = set(years)
+    wanted = set(years) if years else None
     found = {}
 
     league_id = start_id
     seen_ids = set()
-    while league_id and league_id not in seen_ids and not wanted.issubset(found.keys()):
+    while league_id and league_id not in seen_ids:
+        if wanted is not None and wanted.issubset(found.keys()):
+            break
         seen_ids.add(league_id)
         data = fetch_league(league_id)
         season = data.get("season")
         if season:
             season = int(season)
-            if season in wanted:
+            if wanted is None or season in wanted:
                 found[season] = league_id
         league_id = data.get("previous_league_id")
 
@@ -268,10 +277,19 @@ def pull_season(conn, league_config, year, external_season_id):
         )
         matchup_records.extend(_matchups_to_records(week, week_matchups))
 
+    # Sleeper exposes the playoff cutoff directly (unlike ESPN, where this
+    # has to be configured by hand) -- the regular season is every week
+    # before playoffs start. Self-service leagues (added through the web
+    # UI, no config.json entry) rely entirely on this; leagues configured
+    # in config.json can still override it there per season if needed.
+    playoff_week_start = (league.get("settings") or {}).get("playoff_week_start")
+    regular_season_weeks = playoff_week_start - 1 if playoff_week_start else None
+
     return {
         "platform": PLATFORM,
         "external_id": external_season_id,
         "league_name": league.get("name"),
+        "regular_season_weeks": regular_season_weeks,
         "team_manager": team_manager,
         "team_name": team_name,
         "player_rows": player_rows,

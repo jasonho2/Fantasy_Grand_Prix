@@ -23,6 +23,11 @@ all platforms identically:
             "platform": "espn" | "sleeper",
             "external_id": <that season's platform-side league id>,
             "league_name": str | None,
+            "regular_season_weeks": int | None,  # optional; omitted/None means
+                # "not auto-detectable on this platform" (true for ESPN --
+                # pipeline.py falls back to config.json's regular_season_weeks
+                # for those). Sleeper derives it from the league's own
+                # playoff_week_start setting.
             "team_manager": {platform_team_id: manager_display_name},
             "team_name": {platform_team_id: team_display_name},
             "player_rows": [

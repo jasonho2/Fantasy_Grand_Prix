@@ -10,6 +10,7 @@ const BASE_LINKS = [
   { href: "/standings", label: "Season Leaderboard" },
   { href: "/players", label: "Players & Positions" },
   { href: "/matchups", label: "Matchups & Schedule" },
+  { href: "/leagues/new", label: "+ Add League" },
 ];
 
 function NavInner() {

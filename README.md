@@ -168,6 +168,29 @@ one league/season is skipped with a warning in the run's log instead of
 failing the whole job -- every other league/season still gets pulled and
 committed.
 
+## Adding leagues
+
+Two ways, depending on the platform:
+
+**Sleeper** -- self-service, no repo access needed. Anyone can go to
+**+ Add League** in the nav, paste in a Sleeper league id, and submit. That
+just registers the league (writes one row to the database); the next
+scheduled pipeline run (or a manually triggered one, see "5. Automate it")
+picks it up automatically and pulls its *entire* history -- every season
+back to when the league started, discovered via Sleeper's own season-chain
+metadata, no need to specify which years. The regular-season length is
+similarly auto-detected from Sleeper's own playoff-start setting. This is
+deliberately Sleeper-only: the site has no login, and Sleeper's API needs no
+credentials at all, so there's nothing sensitive in that form. Grand Prix
+contest windows aren't auto-detectable, so a self-service league won't have
+any until you add a `"contests"` entry for it in `config.json`.
+
+**ESPN** -- still requires editing `config.json` and rerunning the pipeline
+(or adding it to the automated workflow's secrets), since it needs real
+`espn_s2`/`SWID` cookies -- credentials this site intentionally never
+accepts through an open, unauthenticated web form. See "1. Pull data" above
+for the config shape.
+
 ## Project layout
 
 - `pipeline.py` -- multi-league entrypoint: loops `config.json`'s `"leagues"`
@@ -195,11 +218,15 @@ committed.
   "5. Automate it" above).
 - `web/` -- Next.js dashboard.
   - `app/standings/`, `app/players/`, `app/matchups/`, `app/contests/` -- the four pages.
-  - `app/api/*/route.js` -- API routes that query the database.
+  - `app/leagues/new/` -- self-service "Add a League" form (Sleeper only --
+    see "Adding leagues through the web UI" below).
+  - `app/api/*/route.js` -- API routes that query the database, all scoped
+    by a `?league=<slug>` param alongside `season`.
+  - `app/api/leagues/route.js` -- handles the "Add a League" form
+    submission (registers a Sleeper league; doesn't pull any data itself).
+  - `app/components/LeagueSelect.js` -- the league-switcher dropdown, hidden
+    whenever fewer than two leagues are registered.
   - `lib/db.js` -- shared database client.
-  - Currently still scoped to a single league implicitly (the first/only
-    one in the database) -- a league switcher and an in-app "add a league"
-    flow are the next piece to build on top of this multi-league backend.
 
 ## Point-total contests (Contests page)
 
@@ -239,11 +266,17 @@ and rerunning is all it takes to change a window's boundaries.
 
 ## Notes / known limitations
 
-- The frontend (`web/`) doesn't have a league switcher or an "add a league"
-  UI yet -- it's still built assuming a single league. The backend
-  (`pipeline.py`, `db.py`, `platforms/`) is fully multi-league; wiring the
-  frontend up to it (league-scoped API routes + a switcher + an onboarding
-  form) is the next phase.
+- There's still no login on this site -- anyone with the URL can view every
+  registered league and use the self-service "Add a League" form. That form
+  is Sleeper-only specifically because of this (see "Adding leagues"
+  above); if this ever needs to be locked down further (e.g. before sharing
+  the URL widely), that's an auth layer to add on top, not a rework of
+  what's here.
+- Each pipeline run merges two sources of leagues: `config.json`'s list
+  (the only place ESPN credentials can live) and any Sleeper leagues
+  already registered in the database that config.json doesn't already
+  cover (i.e. ones added through the web form). A league present in both
+  is only pulled once, via its config.json entry.
 - Sleeper's per-player weekly points are an approximation (closest of
   standard/half-PPR/full-PPR to the league's actual reception scoring --
   see the comment at the top of `platforms/sleeper.py`), since Sleeper's
