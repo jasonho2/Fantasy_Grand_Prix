@@ -2,9 +2,10 @@
 
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 import { useJson } from "../../lib/useJson";
+import { useUrlState } from "../../lib/useUrlState";
 
 const BASE_LINKS = [
   { href: "/standings", label: "Season Leaderboard" },
@@ -15,9 +16,13 @@ const BASE_LINKS = [
 
 function NavInner() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const league = searchParams.get("league");
-  const season = searchParams.get("season");
+  // Read-only here -- Nav never changes these itself, only carries whatever
+  // a page's LeagueSelect/SeasonSelect last set into its own links. See
+  // lib/useUrlState.js for why this isn't next/navigation's
+  // useSearchParams() (it doesn't reliably stay in sync with the raw URL
+  // writes those selects now make).
+  const [league] = useUrlState("league");
+  const [season] = useUrlState("season");
 
   const { data: meta } = useJson(`/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`);
   const grandPrixLabel = meta?.leagueName ? `${meta.leagueName} Grand Prix` : "Contests";
