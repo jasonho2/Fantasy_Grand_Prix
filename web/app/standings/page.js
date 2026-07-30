@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -9,6 +9,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
 import SeasonSelect from "../components/SeasonSelect";
@@ -22,15 +23,203 @@ const COLORS = [
   "#a1887f", "#90a4ae",
 ];
 
-function pivotWeekly(weekly) {
+// Track width the slider line/fill are drawn at, plus the thumb radius
+// reserved as padding on each side -- same slider as Players & Positions
+// (see that page for the fuller explanation of the math).
+const SLIDER_TRACK_WIDTH = 240;
+const SLIDER_THUMB_RADIUS = 7;
+
+// Weekly (non-cumulative) view: one row per week in range, one column per
+// team, that week's raw value.
+function pivotWeekly(weekly, rangeMin, rangeMax) {
   const teams = [...new Set(weekly.map((r) => r.team))].sort();
   const byWeek = new Map();
   for (const row of weekly) {
+    if (row.week < rangeMin || row.week > rangeMax) continue;
     if (!byWeek.has(row.week)) byWeek.set(row.week, { week: row.week });
     byWeek.get(row.week)[row.team] = row.points;
   }
   const rows = [...byWeek.values()].sort((a, b) => a.week - b.week);
   return { teams, rows };
+}
+
+// Cumulative view: running total *within the visible range* -- resets to 0
+// at rangeMin rather than always accumulating from week 1, so narrowing
+// the slider shows "how's this stretch of weeks gone" rather than always
+// carrying the whole season's head start. A team's line stops wherever it
+// last had data, rather than drawing a flat line through a week it has no
+// row for (bye weeks still have a row here since weekly_manager_points is
+// bye-inclusive; a genuinely missing week -- nothing pulled yet -- does not).
+function pivotCumulative(weekly, rangeMin, rangeMax) {
+  const teams = [...new Set(weekly.map((r) => r.team))].sort();
+  const weeksInRange = [...new Set(weekly.map((r) => r.week))]
+    .filter((w) => w >= rangeMin && w <= rangeMax)
+    .sort((a, b) => a - b);
+  const byTeamWeek = new Map(); // `${team}|${week}` -> points
+  for (const row of weekly) byTeamWeek.set(`${row.team}|${row.week}`, row.points);
+
+  const running = new Map();
+  const rows = weeksInRange.map((week) => {
+    const point = { week };
+    for (const team of teams) {
+      const p = byTeamWeek.get(`${team}|${week}`);
+      if (p == null) continue;
+      const total = (running.get(team) || 0) + p;
+      running.set(team, total);
+      point[team] = total;
+    }
+    return point;
+  });
+  return { teams, rows };
+}
+
+// Re-aggregates the Season Leaderboard table for whatever week range the
+// shared slider below is currently set to -- mirrors exactly what
+// api/standings/route.js's SQL used to do server-side at a fixed cutoff
+// (SUM wins/losses/ties/points, AVG points per game, over non-bye
+// matchups only), just computed client-side so it can respond to an
+// arbitrary user-chosen range without a round trip.
+function computeStandings(weeklyRecords, rangeMin, rangeMax) {
+  const byTeam = new Map();
+  for (const r of weeklyRecords) {
+    if (r.week < rangeMin || r.week > rangeMax) continue;
+    if (!byTeam.has(r.team)) {
+      byTeam.set(r.team, { team: r.team, wins: 0, losses: 0, ties: 0, points_for: 0, points_against: 0, games: 0 });
+    }
+    const t = byTeam.get(r.team);
+    t.wins += r.win;
+    t.losses += r.loss;
+    t.ties += r.tie;
+    t.points_for += r.points_for;
+    t.points_against += r.points_against;
+    t.games += 1;
+  }
+  return [...byTeam.values()].map((t) => ({
+    team: t.team,
+    wins: t.wins,
+    losses: t.losses,
+    ties: t.ties,
+    points_for: Number(t.points_for.toFixed(2)),
+    points_against: Number(t.points_against.toFixed(2)),
+    avg_points: t.games ? Number((t.points_for / t.games).toFixed(2)) : 0,
+  }));
+}
+
+// One consolidated trend chart (covers the full season, weeks 1-N, not
+// split into separate regular-season/playoff charts) with a Weekly/
+// Cumulative toggle and an optional divider line at the regular-season/
+// playoff boundary. Used twice below -- once for raw fantasy points, once
+// for Grand Prix (Mario Kart placement) points -- sharing the page-level
+// week-range slider and team-selection state so isolating a team, or
+// narrowing the weeks shown, affects both charts together.
+function TrendChart({ title, weeklyData, rangeMin, rangeMax, regularSeasonWeeks, selectedTeam, onSelectTeam, yAxisLabel }) {
+  const [viewMode, setViewMode] = useState("weekly"); // "weekly" | "cumulative"
+
+  const { teams, rows } = useMemo(() => {
+    return viewMode === "cumulative"
+      ? pivotCumulative(weeklyData, rangeMin, rangeMax)
+      : pivotWeekly(weeklyData, rangeMin, rangeMax);
+  }, [weeklyData, rangeMin, rangeMax, viewMode]);
+
+  const weeksInRange = useMemo(() => {
+    const ws = [];
+    for (let w = rangeMin; w <= rangeMax; w++) ws.push(w);
+    return ws;
+  }, [rangeMin, rangeMax]);
+
+  const visibleTeams = selectedTeam ? teams.filter((t) => t === selectedTeam) : teams;
+
+  // Built from the full team list, not just currently-rendered lines, so
+  // every team stays clickable in the legend even while narrowed to one.
+  const legendPayload = teams.map((team, i) => ({
+    value: team,
+    type: "line",
+    color: COLORS[i % COLORS.length],
+  }));
+
+  // Only draw the boundary once the slider's visible range actually spans
+  // it -- both the last regular-season week and the first playoff week
+  // (14 and 15, for this league) have to be in view, otherwise the line
+  // would be drawn at an edge or outside the plotted data entirely.
+  const showDivider =
+    regularSeasonWeeks != null && rangeMin <= regularSeasonWeeks && rangeMax >= regularSeasonWeeks + 1;
+
+  return (
+    <div className="panel">
+      <h2>
+        {title}
+        {selectedTeam ? " (filtered)" : ""}
+      </h2>
+      <div className="toggle-grid" style={{ marginBottom: 12 }}>
+        <span style={{ fontSize: 13, color: "var(--text-dim)" }}>View:</span>
+        <div className="toggle-grid-buttons">
+          <button
+            type="button"
+            className={`week-chip${viewMode === "weekly" ? " selected" : ""}`}
+            onClick={() => setViewMode("weekly")}
+          >
+            Weekly
+          </button>
+          <button
+            type="button"
+            className={`week-chip${viewMode === "cumulative" ? " selected" : ""}`}
+            onClick={() => setViewMode("cumulative")}
+          >
+            Cumulative
+          </button>
+        </div>
+      </div>
+      {rows.length > 0 ? (
+        <ResponsiveContainer width="100%" height={420}>
+          <LineChart data={rows} margin={{ bottom: 12 }}>
+            <CartesianGrid stroke="#2a2e37" />
+            <XAxis
+              dataKey="week"
+              type="number"
+              domain={[rangeMin, rangeMax]}
+              ticks={weeksInRange}
+              stroke="#9aa1ad"
+              label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }}
+            />
+            <YAxis
+              stroke="#9aa1ad"
+              label={
+                yAxisLabel ? { value: yAxisLabel, angle: -90, position: "insideLeft", fill: "#9aa1ad" } : undefined
+              }
+            />
+            <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
+            {showDivider && (
+              <ReferenceLine
+                x={regularSeasonWeeks + 0.5}
+                stroke="#9aa1ad"
+                strokeDasharray="4 4"
+                label={{ value: "Playoffs", position: "insideTopRight", fill: "#9aa1ad", fontSize: 11 }}
+              />
+            )}
+            <Legend
+              payload={legendPayload}
+              onClick={(e) => onSelectTeam(e.value)}
+              wrapperStyle={{ cursor: "pointer", paddingTop: 20 }}
+            />
+            {visibleTeams.map((team) => (
+              <Line
+                key={team}
+                type="monotone"
+                dataKey={team}
+                stroke={COLORS[teams.indexOf(team) % COLORS.length]}
+                dot={false}
+                strokeWidth={2}
+                onClick={() => onSelectTeam(team)}
+                style={{ cursor: "pointer" }}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <div className="empty-state">No data for the selected weeks.</div>
+      )}
+    </div>
+  );
 }
 
 function StandingsInner() {
@@ -53,9 +242,54 @@ function StandingsInner() {
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState("desc");
 
+  // Shared week-range slider -- sits between the Leaderboard table and the
+  // trend charts, filtering all three. Defaults to the full available
+  // range, same convention as the Players & Positions page's slider.
+  const availableWeeks = useMemo(
+    () => [...new Set((data?.weekly || []).map((r) => r.week))].sort((a, b) => a - b),
+    [data]
+  );
+  const seasonMinWeek = availableWeeks[0] ?? 1;
+  const seasonMaxWeek = availableWeeks[availableWeeks.length - 1] ?? 1;
+
+  const [weekRange, setWeekRange] = useState(null); // [min, max] -- null until weeks are known
+
+  // Reset to the full range whenever the available weeks change (e.g. on
+  // season switch), so a leftover range from a prior season can't silently
+  // filter out everything.
+  useEffect(() => {
+    if (availableWeeks.length > 0) {
+      setWeekRange([seasonMinWeek, seasonMaxWeek]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seasonMinWeek, seasonMaxWeek]);
+
+  const [rangeMin, rangeMax] = weekRange ?? [seasonMinWeek, seasonMaxWeek];
+  const isFullRange = rangeMin === seasonMinWeek && rangeMax === seasonMaxWeek;
+
+  function handleMinChange(value) {
+    const num = Number(value);
+    if (Number.isNaN(num)) return;
+    const next = Math.max(seasonMinWeek, Math.min(num, rangeMax));
+    setWeekRange([next, rangeMax]);
+  }
+
+  function handleMaxChange(value) {
+    const num = Number(value);
+    if (Number.isNaN(num)) return;
+    const next = Math.min(seasonMaxWeek, Math.max(num, rangeMin));
+    setWeekRange([rangeMin, next]);
+  }
+
+  const weeksLabel = rangeMin === rangeMax ? `Week ${rangeMin}` : `Weeks ${rangeMin}-${rangeMax}`;
+
+  const standings = useMemo(
+    () => (data?.weeklyRecords ? computeStandings(data.weeklyRecords, rangeMin, rangeMax) : []),
+    [data, rangeMin, rangeMax]
+  );
+
   const sortedStandings = useMemo(() => {
-    if (!data?.standings) return [];
-    const rows = [...data.standings];
+    const rows = [...standings];
     if (sortKey === null) {
       rows.sort((a, b) => b.wins - a.wins || a.losses - b.losses || b.points_for - a.points_for);
       return rows;
@@ -65,17 +299,7 @@ function StandingsInner() {
       return a[sortKey] > b[sortKey] ? dir : a[sortKey] < b[sortKey] ? -dir : 0;
     });
     return rows;
-  }, [data, sortKey, sortDir]);
-
-  const { teams, rows: trendRows } = useMemo(
-    () => (data?.weekly ? pivotWeekly(data.weekly) : { teams: [], rows: [] }),
-    [data]
-  );
-
-  const { teams: playoffTeams, rows: playoffTrendRows } = useMemo(
-    () => (data?.playoffWeekly ? pivotWeekly(data.playoffWeekly) : { teams: [], rows: [] }),
-    [data]
-  );
+  }, [standings, sortKey, sortDir]);
 
   // Selecting a team (via the standings table or either trend chart's
   // legend/line) narrows both trend charts to just that team. Selecting
@@ -84,25 +308,6 @@ function StandingsInner() {
   function selectTeam(team) {
     setSelectedTeam((prev) => (prev === team ? null : team));
   }
-
-  const visibleTeams = selectedTeam ? teams.filter((t) => t === selectedTeam) : teams;
-  const visiblePlayoffTeams = selectedTeam
-    ? playoffTeams.filter((t) => t === selectedTeam)
-    : playoffTeams;
-
-  // Explicit legend payloads (rather than Recharts' default, which only
-  // lists currently-rendered Lines) so every team stays clickable in the
-  // legend even while the chart itself is narrowed to just one line.
-  const legendPayload = teams.map((team, i) => ({
-    value: team,
-    type: "line",
-    color: COLORS[i % COLORS.length],
-  }));
-  const playoffLegendPayload = playoffTeams.map((team, i) => ({
-    value: team,
-    type: "line",
-    color: COLORS[i % COLORS.length],
-  }));
 
   function toggleSort(key) {
     if (key === sortKey) {
@@ -140,7 +345,7 @@ function StandingsInner() {
           <div className="panel">
             <h2>
               Season Leaderboard
-              {data.regularSeasonWeeks ? ` (Regular Season, Weeks 1-${data.regularSeasonWeeks})` : ""}
+              {!isFullRange ? ` (${weeksLabel})` : ""}
             </h2>
             <div className="table-scroll">
               <table className="standings-table">
@@ -185,81 +390,87 @@ function StandingsInner() {
             {sortedStandings.length === 0 && <div className="empty-state">No matchups played yet.</div>}
           </div>
 
-          <div className="panel">
-            <h2>
-              Weekly Points Trend
-              {data.regularSeasonWeeks ? ` (Regular Season, Weeks 1-${data.regularSeasonWeeks})` : ""}
-            </h2>
-            {trendRows.length > 0 ? (
-              <ResponsiveContainer width="100%" height={420}>
-                <LineChart data={trendRows} margin={{ bottom: 12 }}>
-                  <CartesianGrid stroke="#2a2e37" />
-                  <XAxis dataKey="week" stroke="#9aa1ad" label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }} />
-                  <YAxis stroke="#9aa1ad" />
-                  <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
-                  <Legend
-                    payload={legendPayload}
-                    onClick={(e) => selectTeam(e.value)}
-                    wrapperStyle={{ cursor: "pointer", paddingTop: 20 }}
-                  />
-                  {visibleTeams.map((team) => (
-                    <Line
-                      key={team}
-                      type="monotone"
-                      dataKey={team}
-                      stroke={COLORS[teams.indexOf(team) % COLORS.length]}
-                      dot={false}
-                      strokeWidth={2}
-                      onClick={() => selectTeam(team)}
-                      style={{ cursor: "pointer" }}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="empty-state">No weekly data yet.</div>
+          {/* Shared by the Leaderboard table above and both trend charts
+              below -- same slider component/behavior as Players &
+              Positions. */}
+          <div className="controls" style={{ marginTop: -12, alignItems: "center" }}>
+            <span style={{ fontSize: 14, color: "var(--text-dim)" }}>{weeksLabel}</span>
+            <input
+              type="number"
+              className="week-number-input"
+              min={seasonMinWeek}
+              max={seasonMaxWeek}
+              value={rangeMin}
+              onChange={(e) => handleMinChange(e.target.value)}
+              aria-label="Minimum week (type a number)"
+            />
+            <span style={{ color: "var(--text-dim)" }}>to</span>
+            <input
+              type="number"
+              className="week-number-input"
+              min={seasonMinWeek}
+              max={seasonMaxWeek}
+              value={rangeMax}
+              onChange={(e) => handleMaxChange(e.target.value)}
+              aria-label="Maximum week (type a number)"
+            />
+            <div className="range-slider">
+              <div
+                className="range-slider-track-fill"
+                style={{
+                  left: `${SLIDER_THUMB_RADIUS + ((rangeMin - seasonMinWeek) / (seasonMaxWeek - seasonMinWeek || 1)) * SLIDER_TRACK_WIDTH}px`,
+                  right: `${SLIDER_THUMB_RADIUS + (1 - (rangeMax - seasonMinWeek) / (seasonMaxWeek - seasonMinWeek || 1)) * SLIDER_TRACK_WIDTH}px`,
+                }}
+              />
+              <input
+                type="range"
+                min={seasonMinWeek}
+                max={seasonMaxWeek}
+                value={rangeMin}
+                onChange={(e) => handleMinChange(e.target.value)}
+                aria-label="Minimum week"
+              />
+              <input
+                type="range"
+                min={seasonMinWeek}
+                max={seasonMaxWeek}
+                value={rangeMax}
+                onChange={(e) => handleMaxChange(e.target.value)}
+                aria-label="Maximum week"
+              />
+            </div>
+            {!isFullRange && (
+              <button
+                type="button"
+                className="week-chip"
+                onClick={() => setWeekRange([seasonMinWeek, seasonMaxWeek])}
+              >
+                Reset
+              </button>
             )}
           </div>
 
-          {data.regularSeasonWeeks != null && (
-            <div className="panel">
-              <h2>
-                Playoff Weekly Points Trend
-                {playoffTrendRows.length > 0
-                  ? ` (Weeks ${data.regularSeasonWeeks + 1}-${playoffTrendRows[playoffTrendRows.length - 1].week})`
-                  : ""}
-              </h2>
-              {playoffTrendRows.length > 0 ? (
-                <ResponsiveContainer width="100%" height={420}>
-                  <LineChart data={playoffTrendRows} margin={{ bottom: 12 }}>
-                    <CartesianGrid stroke="#2a2e37" />
-                    <XAxis dataKey="week" stroke="#9aa1ad" label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }} />
-                    <YAxis stroke="#9aa1ad" />
-                    <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
-                    <Legend
-                      payload={playoffLegendPayload}
-                      onClick={(e) => selectTeam(e.value)}
-                      wrapperStyle={{ cursor: "pointer", paddingTop: 20 }}
-                    />
-                    {visiblePlayoffTeams.map((team) => (
-                      <Line
-                        key={team}
-                        type="monotone"
-                        dataKey={team}
-                        stroke={COLORS[playoffTeams.indexOf(team) % COLORS.length]}
-                        dot={false}
-                        strokeWidth={2}
-                        onClick={() => selectTeam(team)}
-                        style={{ cursor: "pointer" }}
-                      />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="empty-state">Playoffs haven&apos;t started yet.</div>
-              )}
-            </div>
-          )}
+          <TrendChart
+            title="Weekly Points Trend"
+            weeklyData={data.weekly || []}
+            rangeMin={rangeMin}
+            rangeMax={rangeMax}
+            regularSeasonWeeks={data.regularSeasonWeeks}
+            selectedTeam={selectedTeam}
+            onSelectTeam={selectTeam}
+            yAxisLabel="Fantasy Points"
+          />
+
+          <TrendChart
+            title="Grand Prix Points Trend"
+            weeklyData={data.gpWeekly || []}
+            rangeMin={rangeMin}
+            rangeMax={rangeMax}
+            regularSeasonWeeks={data.regularSeasonWeeks}
+            selectedTeam={selectedTeam}
+            onSelectTeam={selectTeam}
+            yAxisLabel="Grand Prix Points"
+          />
         </>
       )}
     </>
