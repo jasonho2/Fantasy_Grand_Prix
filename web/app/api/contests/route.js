@@ -18,8 +18,18 @@ import { query } from "@/lib/db";
 //   combined score, every pair in the league is ranked by that combined
 //   score, and BOTH members of a pair receive the full placement points
 //   for wherever the pair landed (via DOUBLE_DASH_POINT_TABLE). A team on
-//   a bye has no partner that week, so it sits out of Double Dash scoring
-//   entirely for that week (shown the same as an unplayed week).
+//   a bye (or otherwise missing a matchup that week) has no partner, so it
+//   races alone -- still ranked against everyone else's combined score,
+//   just on its own single score instead of a pair's.
+//
+// Both modes score off weekly_manager_points (each team's own summed
+// starters), not matchups.home_points/away_points. Those two only agree
+// most weeks -- this league awards the higher-seeded team in a matchup a
+// +1 "home field advantage" point, which ESPN bakes into totalPoints (and
+// therefore matchups.home_points) but which was never a real player stat,
+// so weekly_manager_points never has it. That's exactly what's wanted:
+// the bonus point should count for the real scoreboard/standings
+// (matchups table, untouched) but not for Mario Kart placement.
 //
 // GET /api/contests?league=<slug>&season=2025
 
@@ -98,15 +108,19 @@ export async function GET(request) {
     });
   }
 
-  // Double Dash: pair each week's actual head-to-head matchup into one
-  // combined-score "team", rank pairs against every other pair in the
-  // league that week, and give BOTH members that placement's points --
-  // each still keeps their own individual fantasy score as their
-  // reference column, only the placement points come from the pair.
+  // Double Dash: pair each week's actual head-to-head matchup, rank pairs
+  // against every other pair in the league that week, and give BOTH
+  // members that placement's points -- each still keeps their own
+  // individual (weekly_manager_points) score as their reference column,
+  // only the placement points come from the pair.
+  //
+  // Only used to find out *who played whom* -- not for the point values
+  // themselves (see the file-level comment above for why: matchups'
+  // points include a +1 bonus that shouldn't reach Mario Kart scoring).
   const matchupRows = await query(
     `SELECT mu.week,
-            hm.manager_name AS home_manager, mu.home_points AS home_points,
-            am.manager_name AS away_manager, mu.away_points AS away_points,
+            hm.manager_name AS home_manager,
+            am.manager_name AS away_manager,
             mu.is_bye AS is_bye
      FROM matchups mu
      JOIN teams ht ON ht.team_id = mu.home_team_id
@@ -118,20 +132,50 @@ export async function GET(request) {
     [season, league]
   );
 
+  // week -> manager -> points, straight off weeklyRows (already fetched
+  // above for Solo) -- the bonus-free source of truth for what everyone
+  // actually scored that week, including teams a matchup row might not
+  // capture (see weekly_manager_points' own comment in db.py).
+  const pointsByWeek = new Map();
+  for (const row of weeklyRows) {
+    if (!pointsByWeek.has(row.week)) pointsByWeek.set(row.week, new Map());
+    pointsByWeek.get(row.week).set(row.manager, row.points);
+  }
+
   const pairsByWeek = new Map(); // week -> [{ pairScore, members: [{manager, points}, ...] }]
+  const pairedManagersByWeek = new Map(); // week -> Set(manager) -- who's already covered by a real pair
+
   for (const row of matchupRows) {
-    // A bye has no opponent to pair with -- sits out of Double Dash
-    // scoring for that week entirely (shows as an unplayed week, same as
-    // a cup window that hasn't reached this week yet).
-    if (row.is_bye || row.away_manager == null) continue;
+    if (row.is_bye || row.away_manager == null) continue; // no opponent -- handled in the sweep below
+    const weekPoints = pointsByWeek.get(row.week) || new Map();
+    const homePoints = weekPoints.get(row.home_manager) ?? 0;
+    const awayPoints = weekPoints.get(row.away_manager) ?? 0;
+
     if (!pairsByWeek.has(row.week)) pairsByWeek.set(row.week, []);
     pairsByWeek.get(row.week).push({
-      pairScore: (row.home_points ?? 0) + (row.away_points ?? 0),
+      pairScore: homePoints + awayPoints,
       members: [
-        { manager: row.home_manager, points: row.home_points },
-        { manager: row.away_manager, points: row.away_points },
+        { manager: row.home_manager, points: homePoints },
+        { manager: row.away_manager, points: awayPoints },
       ],
     });
+
+    if (!pairedManagersByWeek.has(row.week)) pairedManagersByWeek.set(row.week, new Set());
+    pairedManagersByWeek.get(row.week).add(row.home_manager);
+    pairedManagersByWeek.get(row.week).add(row.away_manager);
+  }
+
+  // Anyone who fielded a lineup that week but wasn't part of a real pair --
+  // a bye, or a week the platform's schedule just doesn't list a matchup
+  // for -- still races, alone, ranked on their own score against
+  // everyone else's combined pair score. Not excluded from scoring.
+  for (const [week, weekPoints] of pointsByWeek) {
+    const paired = pairedManagersByWeek.get(week) || new Set();
+    for (const [manager, points] of weekPoints) {
+      if (paired.has(manager)) continue;
+      if (!pairsByWeek.has(week)) pairsByWeek.set(week, []);
+      pairsByWeek.get(week).push({ pairScore: points, members: [{ manager, points }] });
+    }
   }
 
   const doubleDashRanked = []; // { week, manager, points, rank, placement_points }
