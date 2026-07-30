@@ -131,6 +131,17 @@ function ContestPanel({ contest }) {
     });
   }, [modeLeaderboard, contest.weeks]);
 
+  // Colors keyed off alphabetical team order -- same convention the
+  // Standings trend chart uses (see pivotWeekly in standings/page.js) --
+  // so a given team gets the same color there and on every cup's chart
+  // here, rather than each cup assigning colors off its own current
+  // rank order (which would drift cup to cup, and from Standings, as
+  // relative standings shift).
+  const sortedTeams = useMemo(
+    () => modeLeaderboard.map((row) => row.team).sort(),
+    [modeLeaderboard]
+  );
+
   const Icon = CUP_ICONS[contest.name];
 
   return (
@@ -258,12 +269,12 @@ function ContestPanel({ contest }) {
             <YAxis stroke="#9aa1ad" label={{ value: "Cumulative points", angle: -90, position: "insideLeft", fill: "#9aa1ad" }} />
             <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
             <Legend wrapperStyle={{ paddingTop: 16 }} />
-            {modeLeaderboard.map((row, i) => (
+            {modeLeaderboard.map((row) => (
               <Line
                 key={row.team}
-                type="monotone"
+                type="linear"
                 dataKey={row.team}
-                stroke={COLORS[i % COLORS.length]}
+                stroke={COLORS[sortedTeams.indexOf(row.team) % COLORS.length]}
                 strokeWidth={2}
                 dot={false}
                 connectNulls={false}
