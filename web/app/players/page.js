@@ -187,7 +187,13 @@ function PlayersInner() {
   const [sortDir, setSortDir] = useState("desc");
 
   const teams = useMemo(() => ["All", ...new Set(rows.map((r) => r.team))].sort(), [rows]);
-  const positions = useMemo(() => ["All", ...new Set(rows.map((r) => r.position))].sort(), [rows]);
+  // Same order as the chart/legend above (QB, RB, WR, TE, D/ST, K), not
+  // alphabetical, so picking a position here lines up with where it sits
+  // in the legend.
+  const positions = useMemo(
+    () => ["All", ...sortPositions([...new Set(rows.map((r) => r.position))])],
+    [rows]
+  );
   const availableWeeks = useMemo(
     () => [...new Set(rows.map((r) => r.week))].sort((a, b) => a - b),
     [rows]
@@ -311,7 +317,21 @@ function PlayersInner() {
                     tick={(props) => <TeamTick {...props} />}
                   />
                   <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
-                  <Legend />
+                  {/* Clicking a position in the legend sets the same
+                      positionFilter state the dropdown below drives --
+                      since both the chart's aggregation and the Player
+                      Totals table already read from filteredRows (which
+                      depends on positionFilter), this filters both with no
+                      extra plumbing. Clicking the already-selected position
+                      again clears back to "All" (Recharts hands the
+                      dataKey back as entry.value, since the <Bar>s below
+                      don't override `name`). */}
+                  <Legend
+                    onClick={(entry) =>
+                      setPositionFilter((prev) => (prev === entry.value ? "All" : entry.value))
+                    }
+                    wrapperStyle={{ cursor: "pointer" }}
+                  />
                   {chartPositions.map((pos, i) => (
                     <Bar key={pos} dataKey={pos} stackId="pos" fill={POSITION_COLORS[pos] || FALLBACK_COLOR}>
                       {i === chartPositions.length - 1 && (
