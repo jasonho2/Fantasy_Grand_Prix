@@ -167,7 +167,7 @@ function MatchupsInner() {
                               {row.home_team}
                               {homeRec && <span style={recordStyle}> ({homeRec})</span>}
                             </td>
-                            <td>
+                            <td title={row.is_bye ? "Starter points scored (bye week)" : undefined}>
                               {row.home_points?.toFixed?.(1) ?? row.home_points}
                               {!row.is_bye && row.away_points != null && ` - ${row.away_points.toFixed?.(1) ?? row.away_points}`}
                             </td>
