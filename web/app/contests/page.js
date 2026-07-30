@@ -106,41 +106,47 @@ function ContestPanel({ contest }) {
         <span className={`badge ${STATUS_BADGE_CLASS[contest.status]}`}>{STATUS_LABEL[contest.status]}</span>
       </h2>
 
-      <div className="controls" style={{ marginBottom: 8 }}>
-        <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Mode:</span>
-        <button
-          type="button"
-          className={`week-chip${mode === "solo" ? " selected" : ""}`}
-          onClick={() => setMode("solo")}
-        >
-          Solo
-        </button>
-        <button
-          type="button"
-          className={`week-chip${mode === "doubleDash" ? " selected" : ""}`}
-          onClick={() => setMode("doubleDash")}
-          title="This week's actual matchup pairs combine scores and get ranked as a pair -- both teammates score the same placement points."
-        >
-          Double Dash
-        </button>
-      </div>
-
+      {/* Two independent toggle groups sharing one wrapping flex row: "Sort
+          by" first in DOM order so it lands on the first line if there's
+          only room for one group per line (narrow/mobile), "Mode" second so
+          it either shares that line when there's space, or drops to its
+          own line below. */}
       <div className="controls" style={{ marginBottom: 12 }}>
-        <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Sort by:</span>
-        <button
-          type="button"
-          className={`week-chip${sortBy === "contest_points" ? " selected" : ""}`}
-          onClick={() => setSortBy("contest_points")}
-        >
-          Total
-        </button>
-        <button
-          type="button"
-          className={`week-chip${sortBy === "fantasy_points" ? " selected" : ""}`}
-          onClick={() => setSortBy("fantasy_points")}
-        >
-          Fantasy Points (ref)
-        </button>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Sort by:</span>
+          <button
+            type="button"
+            className={`week-chip${sortBy === "contest_points" ? " selected" : ""}`}
+            onClick={() => setSortBy("contest_points")}
+          >
+            Total
+          </button>
+          <button
+            type="button"
+            className={`week-chip${sortBy === "fantasy_points" ? " selected" : ""}`}
+            onClick={() => setSortBy("fantasy_points")}
+          >
+            Fantasy Points (ref)
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Mode:</span>
+          <button
+            type="button"
+            className={`week-chip${mode === "solo" ? " selected" : ""}`}
+            onClick={() => setMode("solo")}
+          >
+            Solo
+          </button>
+          <button
+            type="button"
+            className={`week-chip${mode === "doubleDash" ? " selected" : ""}`}
+            onClick={() => setMode("doubleDash")}
+            title="This week's actual matchup pairs combine scores and get ranked as a pair -- both teammates score the same placement points."
+          >
+            Double Dash
+          </button>
+        </div>
       </div>
 
       <div className="table-scroll">
