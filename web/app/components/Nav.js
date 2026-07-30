@@ -12,6 +12,7 @@ const BASE_LINKS = [
   { href: "/players", label: "Players & Positions" },
   { href: "/matchups", label: "Matchups & Schedule" },
   { href: "/leagues/new", label: "Leagues" },
+  { href: "/about", label: "About" },
 ];
 
 // SQLite's datetime('now') returns UTC as "YYYY-MM-DD HH:MM:SS" -- not ISO
