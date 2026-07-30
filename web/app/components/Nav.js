@@ -12,7 +12,6 @@ const BASE_LINKS = [
   { href: "/players", label: "Players & Positions" },
   { href: "/matchups", label: "Matchups & Schedule" },
   { href: "/leagues/new", label: "Leagues" },
-  { href: "/about", label: "About" },
 ];
 
 // SQLite's datetime('now') returns UTC as "YYYY-MM-DD HH:MM:SS" -- not ISO
@@ -51,7 +50,9 @@ function NavInner() {
   const grandPrixLabel = meta?.leagueName ? `${meta.leagueName} Grand Prix` : "Contests";
   const dataAsOf = formatDataAsOf(meta?.lastPulledAt);
 
-  const links = [{ href: "/contests", label: grandPrixLabel }, ...BASE_LINKS];
+  // About is first "for now" per explicit request -- easy to move back
+  // once the page's content is refined.
+  const links = [{ href: "/about", label: "About" }, { href: "/contests", label: grandPrixLabel }, ...BASE_LINKS];
 
   // Carry the selected league and season across page navigation, so picking
   // either on one page doesn't silently reset when clicking to another.
