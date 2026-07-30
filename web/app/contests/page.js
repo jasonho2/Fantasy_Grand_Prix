@@ -103,6 +103,10 @@ function ContestPanel({ contest }) {
   // Descending only, per spec -- just which column, not direction.
   const [sortBy, setSortBy] = useState("contest_points");
   const [view, setView] = useState("table");
+  // Clicking a team's name in the chart legend narrows the chart to just
+  // that team's line; clicking it again, or clicking anywhere else in the
+  // chart, clears it back to showing everyone.
+  const [selectedTeam, setSelectedTeam] = useState(null);
 
   const modeLeaderboard = mode === "solo" ? contest.leaderboard : contest.doubleDashLeaderboard;
 
@@ -141,6 +145,28 @@ function ContestPanel({ contest }) {
     () => modeLeaderboard.map((row) => row.team).sort(),
     [modeLeaderboard]
   );
+
+  // event is the underlying MouseEvent for both Legend's and Line's onClick
+  // (Recharts passes it as the 3rd argument either way) -- stopping it from
+  // bubbling is what keeps selecting a team from immediately re-triggering
+  // the chart wrapper's own onClick, which is what clears the selection.
+  function selectTeam(team, event) {
+    event?.stopPropagation();
+    setSelectedTeam((prev) => (prev === team ? null : team));
+  }
+
+  // Built from the full leaderboard, not whichever teams currently have a
+  // rendered Line -- otherwise the legend would shrink down to just the
+  // selected team once isolated, and there'd be no way to click over to a
+  // different team without resetting first.
+  const legendPayload = modeLeaderboard.map((row) => ({
+    value: row.team,
+    type: "line",
+    color: COLORS[sortedTeams.indexOf(row.team) % COLORS.length],
+  }));
+  const visibleRows = selectedTeam
+    ? modeLeaderboard.filter((row) => row.team === selectedTeam)
+    : modeLeaderboard;
 
   const Icon = CUP_ICONS[contest.name];
 
@@ -258,30 +284,53 @@ function ContestPanel({ contest }) {
           </table>
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={Math.max(320, modeLeaderboard.length * 24 + 200)}>
-          <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
-            <CartesianGrid stroke="#2a2e37" />
-            <XAxis
-              dataKey="week"
-              stroke="#9aa1ad"
-              label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }}
-            />
-            <YAxis stroke="#9aa1ad" label={{ value: "Cumulative points", angle: -90, position: "insideLeft", fill: "#9aa1ad" }} />
-            <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
-            <Legend wrapperStyle={{ paddingTop: 16 }} />
-            {modeLeaderboard.map((row) => (
-              <Line
-                key={row.team}
-                type="linear"
-                dataKey={row.team}
-                stroke={COLORS[sortedTeams.indexOf(row.team) % COLORS.length]}
-                strokeWidth={2}
-                dot={false}
-                connectNulls={false}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
+        <>
+          {selectedTeam && (
+            <p style={{ fontSize: 13, color: "var(--text-dim)", margin: "0 0 8px" }}>
+              Showing trend for <strong style={{ color: "var(--text)" }}>{selectedTeam}</strong> -- click
+              elsewhere on the chart to show everyone again.
+            </p>
+          )}
+          {/* Clicking anywhere in here that isn't a legend entry or line
+              (both stop propagation in their own onClick) clears the
+              selection -- CartesianGrid, empty plot area, the container
+              padding, all of it. */}
+          <div onClick={() => setSelectedTeam(null)}>
+            <ResponsiveContainer width="100%" height={Math.max(320, modeLeaderboard.length * 24 + 200)}>
+              <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+                <CartesianGrid stroke="#2a2e37" />
+                <XAxis
+                  dataKey="week"
+                  stroke="#9aa1ad"
+                  label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }}
+                />
+                <YAxis
+                  stroke="#9aa1ad"
+                  label={{ value: "Cumulative points", angle: -90, position: "insideLeft", fill: "#9aa1ad" }}
+                />
+                <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
+                <Legend
+                  payload={legendPayload}
+                  onClick={(entry, index, event) => selectTeam(entry.value, event)}
+                  wrapperStyle={{ cursor: "pointer", paddingTop: 16 }}
+                />
+                {visibleRows.map((row) => (
+                  <Line
+                    key={row.team}
+                    type="linear"
+                    dataKey={row.team}
+                    stroke={COLORS[sortedTeams.indexOf(row.team) % COLORS.length]}
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls={false}
+                    onClick={(_, __, event) => selectTeam(row.team, event)}
+                    style={{ cursor: "pointer" }}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </>
       )}
       {sortedLeaderboard.length === 0 && <div className="empty-state">No games played in this window yet.</div>}
     </div>
