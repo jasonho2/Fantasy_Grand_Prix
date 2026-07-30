@@ -331,18 +331,19 @@ nav.topnav a.active {
   flex-wrap: wrap;
 }
 
-/* Two label+buttons toggle groups (e.g. a cup's "Sort by" / "Mode") that
+/* Label+buttons toggle groups (a cup's "Sort by" / "Mode" / "View") that
    should stay grid-aligned with each other, not just wrapped flex items --
    plain flex-wrap left them staggered once forced onto separate lines,
    since each label is a different width. Grid's shared column tracks keep
-   both labels the same width and both button groups starting at the same
-   x, on one row or two. Four columns wide enough to fit both groups on one
-   line; the mobile query below drops to two, which -- combined with
-   grid's default row-major auto-placement -- naturally stacks the second
-   group onto its own row underneath, still aligned to the first. */
+   every label the same width and every button group starting at the same
+   x, on one row or several. Six columns (three label+buttons pairs) wide
+   enough to fit all of them on one line at desktop/landscape widths; the
+   mobile query below drops to two, which -- combined with grid's default
+   row-major auto-placement -- naturally stacks each group onto its own
+   row underneath, still aligned to the first. */
 .toggle-grid {
   display: grid;
-  grid-template-columns: repeat(4, max-content);
+  grid-template-columns: repeat(6, max-content);
   column-gap: 28px;
   row-gap: 10px;
   align-items: center;
