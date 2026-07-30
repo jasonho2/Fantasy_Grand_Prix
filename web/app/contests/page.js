@@ -110,8 +110,11 @@ function ContestPanel({ contest }) {
           by" first in DOM order so it lands on the first line if there's
           only room for one group per line (narrow/mobile), "Mode" second so
           it either shares that line when there's space, or drops to its
-          own line below. */}
-      <div className="controls" style={{ marginBottom: 12 }}>
+          own line below. Wider column-gap than the default .controls gap
+          so the two groups read as visually distinct, not crowded together
+          -- row-gap (used once they wrap onto separate lines) stays at the
+          usual spacing. */}
+      <div className="controls" style={{ marginBottom: 12, gap: "10px 28px" }}>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Sort by:</span>
           <button
