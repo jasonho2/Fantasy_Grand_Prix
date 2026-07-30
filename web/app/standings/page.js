@@ -30,14 +30,17 @@ const SLIDER_TRACK_WIDTH = 240;
 const SLIDER_THUMB_RADIUS = 7;
 
 // Weekly (non-cumulative) view: one row per week in range, one column per
-// team, that week's raw value.
+// team, that week's raw value. Rounded to 2 decimals for display -- the
+// underlying weekly_manager_points values already are (see its ROUND() in
+// db.py), so this is mostly a safety net; Grand Prix's placement points
+// are always whole numbers, so rounding is a no-op there either way.
 function pivotWeekly(weekly, rangeMin, rangeMax) {
   const teams = [...new Set(weekly.map((r) => r.team))].sort();
   const byWeek = new Map();
   for (const row of weekly) {
     if (row.week < rangeMin || row.week > rangeMax) continue;
     if (!byWeek.has(row.week)) byWeek.set(row.week, { week: row.week });
-    byWeek.get(row.week)[row.team] = row.points;
+    byWeek.get(row.week)[row.team] = row.points == null ? row.points : Number(row.points.toFixed(2));
   }
   const rows = [...byWeek.values()].sort((a, b) => a.week - b.week);
   return { teams, rows };
@@ -64,7 +67,10 @@ function pivotCumulative(weekly, rangeMin, rangeMax) {
     for (const team of teams) {
       const p = byTeamWeek.get(`${team}|${week}`);
       if (p == null) continue;
-      const total = (running.get(team) || 0) + p;
+      // Rounded at every step, not just the final value -- summing
+      // already-rounded weekly figures in floating point can otherwise
+      // drift to something like 35.369999999999997 a few weeks in.
+      const total = Number(((running.get(team) || 0) + p).toFixed(2));
       running.set(team, total);
       point[team] = total;
     }
@@ -112,8 +118,18 @@ function computeStandings(weeklyRecords, rangeMin, rangeMax) {
 // for Grand Prix (Mario Kart placement) points -- sharing the page-level
 // week-range slider and team-selection state so isolating a team, or
 // narrowing the weeks shown, affects both charts together.
-function TrendChart({ title, weeklyData, rangeMin, rangeMax, regularSeasonWeeks, selectedTeam, onSelectTeam, yAxisLabel }) {
-  const [viewMode, setViewMode] = useState("weekly"); // "weekly" | "cumulative"
+function TrendChart({
+  title,
+  weeklyData,
+  rangeMin,
+  rangeMax,
+  regularSeasonWeeks,
+  selectedTeam,
+  onSelectTeam,
+  yAxisLabel,
+  defaultViewMode = "weekly",
+}) {
+  const [viewMode, setViewMode] = useState(defaultViewMode); // "weekly" | "cumulative"
 
   const { teams, rows } = useMemo(() => {
     return viewMode === "cumulative"
@@ -283,9 +299,32 @@ function StandingsInner() {
 
   const weeksLabel = rangeMin === rangeMax ? `Week ${rangeMin}` : `Weeks ${rangeMin}-${rangeMax}`;
 
+  // The Leaderboard table stays capped to the regular season (weeks
+  // 1-regularSeasonWeeks) regardless of how far the shared slider's upper
+  // handle is dragged into the playoffs -- only the trend charts below
+  // follow the slider's full range. Narrowing the slider's own upper bound
+  // to regularSeasonWeeks or below (e.g. weeks 1-10) still updates the
+  // table normally, since rangeMax is then already <= the cap and min()
+  // is a no-op; dragging past it (e.g. weeks 1-17) just stops moving the
+  // table's upper bound any further, rather than pulling playoff games
+  // into the win-loss record. An empty result (e.g. the slider narrowed
+  // entirely into playoff weeks, rangeMin > regularSeasonWeeks) falls
+  // through to the existing "No matchups played yet" empty state.
+  const regularSeasonWeeks = data?.regularSeasonWeeks ?? null;
+  const leaderboardMax = regularSeasonWeeks != null ? Math.min(rangeMax, regularSeasonWeeks) : rangeMax;
+  const leaderboardMin = Math.min(rangeMin, leaderboardMax);
+  const leaderboardHasWeeks = rangeMin <= leaderboardMax;
+  const leaderboardIsFullRange =
+    rangeMin === seasonMinWeek && leaderboardMax === (regularSeasonWeeks ?? seasonMaxWeek);
+  const leaderboardWeeksLabel =
+    leaderboardMin === leaderboardMax ? `Week ${leaderboardMin}` : `Weeks ${leaderboardMin}-${leaderboardMax}`;
+
   const standings = useMemo(
-    () => (data?.weeklyRecords ? computeStandings(data.weeklyRecords, rangeMin, rangeMax) : []),
-    [data, rangeMin, rangeMax]
+    () =>
+      data?.weeklyRecords && leaderboardHasWeeks
+        ? computeStandings(data.weeklyRecords, rangeMin, leaderboardMax)
+        : [],
+    [data, rangeMin, leaderboardMax, leaderboardHasWeeks]
   );
 
   const sortedStandings = useMemo(() => {
@@ -345,7 +384,7 @@ function StandingsInner() {
           <div className="panel">
             <h2>
               Season Leaderboard
-              {!isFullRange ? ` (${weeksLabel})` : ""}
+              {!leaderboardIsFullRange ? ` (${leaderboardWeeksLabel})` : ""}
             </h2>
             <div className="table-scroll">
               <table className="standings-table">
@@ -470,6 +509,7 @@ function StandingsInner() {
             selectedTeam={selectedTeam}
             onSelectTeam={selectTeam}
             yAxisLabel="Grand Prix Points"
+            defaultViewMode="cumulative"
           />
         </>
       )}
