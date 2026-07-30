@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -23,6 +23,204 @@ const COLORS = [
   "#4dd4d4", "#ff9f5b", "#9fd35c", "#f06292", "#7986cb",
   "#a1887f", "#90a4ae",
 ];
+
+// Mirrors POINT_TABLE / DOUBLE_DASH_POINT_TABLE in api/contests/route.js --
+// used both as the placeholder shown in each blank point-entry box and as
+// the fallback value for any placement a custom table leaves blank. Keep in
+// sync with the API route if either ever changes.
+const DEFAULT_POINT_TABLES = {
+  solo: [12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+  doubleDash: [12, 10, 9, 8, 7, 5],
+};
+
+function ordinal(n) {
+  const suffixes = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]}`;
+}
+
+// A custom point table is a personal display preference, not shared server
+// state -- persisted client-side (localStorage), keyed per league+season+
+// cup+mode so switching any of those never bleeds one table's overrides
+// into another and a page reload doesn't lose them. `table` is a sparse
+// array of strings, one slot per placement (index 0 = 1st place); a blank
+// slot means "no override -- use the built-in default for that placement,"
+// not zero. Returns null (not an empty array) when nothing is stored, so
+// callers can cheaply check "is any customization active."
+function useCustomPointTable(key) {
+  const [table, setTableState] = useState(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !key) {
+      setTableState(null);
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(key);
+      setTableState(raw ? JSON.parse(raw) : null);
+    } catch {
+      setTableState(null);
+    }
+  }, [key]);
+
+  const save = useCallback(
+    (next) => {
+      if (!key) return;
+      setTableState(next);
+      try {
+        if (next) window.localStorage.setItem(key, JSON.stringify(next));
+        else window.localStorage.removeItem(key);
+      } catch {
+        // localStorage unavailable (private browsing, quota, etc.) -- the
+        // table still applies for the rest of this session via state, it
+        // just won't survive a reload.
+      }
+    },
+    [key]
+  );
+
+  return [table, save];
+}
+
+// A blank/undefined slot in a custom table falls back to that placement's
+// default value; an unranked week (bye/unplayed -- rank null) stays null
+// rather than 0, so charts/table cells can keep showing "--" for it.
+function pointsForRank(rank, table, defaults) {
+  if (rank == null) return null;
+  const idx = rank - 1;
+  const override = table ? table[idx] : undefined;
+  if (override !== undefined && override !== null && override !== "") {
+    const n = Number(override);
+    if (Number.isFinite(n)) return n;
+  }
+  return idx < defaults.length ? defaults[idx] : 0;
+}
+
+// Re-derives weekly_points/contest_points/rank/rankDelta for one cup+mode's
+// leaderboard using a custom placement -> points table, from the
+// weekly_rank/weekly_fantasy arrays the API already includes on every row.
+// Mirrors the reduction api/contests/route.js itself does (buildLeaderboard
+// + sumByManager + rankByContestPoints): same tiebreak (contest points,
+// then fantasy points), same "rank movement vs. the previous played week
+// within this cup" rule for the arrows -- just swapping which table turns a
+// weekly rank into weekly points.
+function applyCustomScoring(rows, weeks, table, defaults) {
+  const withPoints = rows.map((row) => {
+    const weekly_points = row.weekly_rank.map((rank) => pointsForRank(rank, table, defaults));
+    const contest_points = weekly_points.reduce((sum, p) => sum + (p ?? 0), 0);
+    return { ...row, weekly_points, contest_points };
+  });
+
+  // Same "as of the previous played week in this cup" rule the API uses --
+  // find the latest week index anyone has a rank for, then total everyone
+  // up through (not including) that index.
+  let latestIdx = -1;
+  weeks.forEach((_, i) => {
+    if (withPoints.some((row) => row.weekly_rank[i] != null)) latestIdx = i;
+  });
+  const playedCount = weeks.reduce(
+    (n, _, i) => n + (withPoints.some((row) => row.weekly_rank[i] != null) ? 1 : 0),
+    0
+  );
+
+  // Keyed by team, not manager -- the API's buildLeaderboard destructures
+  // `manager` out of each row before returning it (only `team` survives, see
+  // api/contests/route.js), so `row.manager` is undefined here. team names
+  // are unique within a season (one manager per team), so this is a safe
+  // stand-in for the same purpose: a stable per-row identity to track
+  // "previous week's rank" by.
+  let previousRanks = new Map();
+  if (playedCount >= 2 && latestIdx > 0) {
+    const priorTotals = withPoints.map((row) => {
+      let contest = 0;
+      let fantasy = 0;
+      for (let i = 0; i < latestIdx; i++) {
+        contest += row.weekly_points[i] ?? 0;
+        fantasy += row.weekly_fantasy[i] ?? 0;
+      }
+      return { team: row.team, contest, fantasy };
+    });
+    priorTotals.sort((a, b) => b.contest - a.contest || b.fantasy - a.fantasy);
+    priorTotals.forEach((r, i) => previousRanks.set(r.team, i + 1));
+  }
+
+  return [...withPoints]
+    .sort((a, b) => b.contest_points - a.contest_points || b.fantasy_points - a.fantasy_points)
+    .map((row, i) => {
+      const rank = i + 1;
+      const previousRank = previousRanks.get(row.team) ?? null;
+      return { ...row, rank, rankDelta: previousRank != null ? previousRank - rank : null };
+    });
+}
+
+// Inline editor for one cup+mode's placement -> points table. `value` is
+// the currently-saved sparse array (or null for "no overrides"); `defaults`
+// is that mode's built-in table, shown as each blank box's placeholder.
+// Keyed by mode from the parent (see ContestPanel) so switching Solo/Double
+// Dash while this is open remounts it fresh instead of carrying over draft
+// values typed for the other mode's table.
+function PointSystemEditor({ mode, defaults, value, onSave, onReset, onCancel }) {
+  const [draft, setDraft] = useState(() => defaults.map((_, i) => value?.[i] ?? ""));
+
+  function update(i, raw) {
+    setDraft((prev) => {
+      const next = [...prev];
+      next[i] = raw;
+      return next;
+    });
+  }
+
+  function handleSave() {
+    // Nothing entered anywhere is the same as no override at all -- store
+    // null instead of an array of empty strings.
+    const hasAny = draft.some((v) => v !== "" && v != null);
+    onSave(hasAny ? draft : null);
+  }
+
+  return (
+    <div className="panel" style={{ marginBottom: 12, background: "var(--bg)" }}>
+      <p style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 0 }}>
+        Points awarded for each weekly placement in {mode === "solo" ? "Solo" : "Double Dash"} mode.
+        Leave a box blank to keep the default for that placement.
+      </p>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))",
+          gap: 10,
+          marginBottom: 14,
+        }}
+      >
+        {defaults.map((def, i) => (
+          <label
+            key={i}
+            style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-dim)" }}
+          >
+            {ordinal(i + 1)}
+            <input
+              type="number"
+              className="week-number-input"
+              placeholder={String(def)}
+              value={draft[i]}
+              onChange={(e) => update(i, e.target.value)}
+            />
+          </label>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button type="button" className="week-chip selected" onClick={handleSave}>
+          Save
+        </button>
+        <button type="button" className="week-chip" onClick={onReset}>
+          Reset to Default
+        </button>
+        <button type="button" className="week-chip" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const STATUS_LABEL = {
   final: "Final",
@@ -93,7 +291,7 @@ function RankDelta({ delta }) {
   );
 }
 
-function ContestPanel({ contest }) {
+function ContestPanel({ contest, league, season }) {
   // Which ranking to show: Solo (each team ranked individually every week)
   // or Double Dash (that week's real head-to-head matchup pairs combine
   // scores and get ranked as a pair -- see the contests API route for the
@@ -107,13 +305,34 @@ function ContestPanel({ contest }) {
   // that team's line; clicking it again, or clicking anywhere else in the
   // chart, clears it back to showing everyone.
   const [selectedTeam, setSelectedTeam] = useState(null);
+  const [editingPoints, setEditingPoints] = useState(false);
 
   const modeLeaderboard = mode === "solo" ? contest.leaderboard : contest.doubleDashLeaderboard;
+  const defaultPointTable = mode === "solo" ? DEFAULT_POINT_TABLES.solo : DEFAULT_POINT_TABLES.doubleDash;
+
+  // "Change Point System" lets the viewer override how many points each
+  // weekly placement is worth, per cup and per mode -- comes after the
+  // Solo/Double Dash choice (this key includes `mode`) since the two modes
+  // have differently-sized placement tables. Purely a client-side display
+  // preference (see applyCustomScoring below), persisted in localStorage so
+  // it survives a reload but never touches the server or other viewers.
+  const pointsKey =
+    league && season ? `contest-points:${league}:${season}:${contest.name}:${mode}` : null;
+  const [customPointTable, saveCustomPointTable] = useCustomPointTable(pointsKey);
+
+  // Everything below reads from effectiveLeaderboard, not modeLeaderboard
+  // directly, so a custom point table (when set) flows through the sort
+  // toggle, the table, and the chart identically to the server's default
+  // scoring.
+  const effectiveLeaderboard = useMemo(() => {
+    if (!customPointTable) return modeLeaderboard;
+    return applyCustomScoring(modeLeaderboard, contest.weeks, customPointTable, defaultPointTable);
+  }, [modeLeaderboard, contest.weeks, customPointTable, defaultPointTable]);
 
   const sortedLeaderboard = useMemo(() => {
-    const rows = [...modeLeaderboard].sort((a, b) => b[sortBy] - a[sortBy]);
+    const rows = [...effectiveLeaderboard].sort((a, b) => b[sortBy] - a[sortBy]);
     return rows.map((row, i) => ({ ...row, displayRank: i + 1 }));
-  }, [modeLeaderboard, sortBy]);
+  }, [effectiveLeaderboard, sortBy]);
 
   // One point per week, each team's *cumulative* placement points through
   // that week -- running total, not that week's placement alone (which is
@@ -124,7 +343,7 @@ function ContestPanel({ contest }) {
     const running = new Map(); // team -> running total so far
     return contest.weeks.map((wk, i) => {
       const point = { week: wk };
-      for (const row of modeLeaderboard) {
+      for (const row of effectiveLeaderboard) {
         const weekPoints = row.weekly_points[i];
         if (weekPoints == null) continue; // not played yet -- leave this team out of this week's point
         const total = (running.get(row.team) || 0) + weekPoints;
@@ -133,7 +352,7 @@ function ContestPanel({ contest }) {
       }
       return point;
     });
-  }, [modeLeaderboard, contest.weeks]);
+  }, [effectiveLeaderboard, contest.weeks]);
 
   // Colors keyed off alphabetical team order -- same convention the
   // Standings trend chart uses (see pivotWeekly in standings/page.js) --
@@ -142,8 +361,8 @@ function ContestPanel({ contest }) {
   // rank order (which would drift cup to cup, and from Standings, as
   // relative standings shift).
   const sortedTeams = useMemo(
-    () => modeLeaderboard.map((row) => row.team).sort(),
-    [modeLeaderboard]
+    () => effectiveLeaderboard.map((row) => row.team).sort(),
+    [effectiveLeaderboard]
   );
 
   // event is the underlying MouseEvent for both Legend's and Line's onClick
@@ -159,14 +378,14 @@ function ContestPanel({ contest }) {
   // rendered Line -- otherwise the legend would shrink down to just the
   // selected team once isolated, and there'd be no way to click over to a
   // different team without resetting first.
-  const legendPayload = modeLeaderboard.map((row) => ({
+  const legendPayload = effectiveLeaderboard.map((row) => ({
     value: row.team,
     type: "line",
     color: COLORS[sortedTeams.indexOf(row.team) % COLORS.length],
   }));
   const visibleRows = selectedTeam
-    ? modeLeaderboard.filter((row) => row.team === selectedTeam)
-    : modeLeaderboard;
+    ? effectiveLeaderboard.filter((row) => row.team === selectedTeam)
+    : effectiveLeaderboard;
 
   const Icon = CUP_ICONS[contest.name];
 
@@ -244,6 +463,39 @@ function ContestPanel({ contest }) {
         </div>
       </div>
 
+      {/* Edits the point table for whichever mode is currently selected
+          above -- reopening it after switching Solo/Double Dash shows that
+          mode's own (possibly different) overrides, per spec: point entry
+          comes after the mode choice, not alongside it. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <button type="button" className="week-chip" onClick={() => setEditingPoints((v) => !v)}>
+          {editingPoints ? "Close Point System" : "Change Point System"}
+        </button>
+        {customPointTable && !editingPoints && (
+          <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
+            Custom {mode === "solo" ? "Solo" : "Double Dash"} scoring active
+          </span>
+        )}
+      </div>
+
+      {editingPoints && (
+        <PointSystemEditor
+          key={mode}
+          mode={mode}
+          defaults={defaultPointTable}
+          value={customPointTable}
+          onSave={(next) => {
+            saveCustomPointTable(next);
+            setEditingPoints(false);
+          }}
+          onReset={() => {
+            saveCustomPointTable(null);
+            setEditingPoints(false);
+          }}
+          onCancel={() => setEditingPoints(false)}
+        />
+      )}
+
       {view === "table" ? (
         <div className="table-scroll">
           <table className="contests-table">
@@ -296,7 +548,7 @@ function ContestPanel({ contest }) {
               selection -- CartesianGrid, empty plot area, the container
               padding, all of it. */}
           <div onClick={() => setSelectedTeam(null)}>
-            <ResponsiveContainer width="100%" height={Math.max(320, modeLeaderboard.length * 24 + 200)}>
+            <ResponsiveContainer width="100%" height={Math.max(320, effectiveLeaderboard.length * 24 + 200)}>
               <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
                 <CartesianGrid stroke="#2a2e37" />
                 <XAxis
@@ -412,7 +664,7 @@ function ContestsInner() {
       )}
 
       {startedContests.map((contest) => (
-        <ContestPanel key={contest.name} contest={contest} />
+        <ContestPanel key={contest.name} contest={contest} league={activeLeague} season={activeSeason} />
       ))}
     </>
   );

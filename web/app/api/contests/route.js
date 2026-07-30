@@ -33,6 +33,18 @@ import { query } from "@/lib/db";
 //
 // GET /api/contests?league=<slug>&season=2025
 
+// These are the *default* placement -> points tables, used for the
+// contest_points/rank/rankDelta this route returns. A user can override
+// them per cup+mode from the "Change Point System" editor on the Grand
+// Prix page -- that's a client-side-only preference (see applyCustomScoring
+// in contests/page.js), which is why weekly_rank/weekly_fantasy are also
+// included on every leaderboard row below: they're the raw ingredients the
+// frontend needs to re-derive everything under a custom table without a
+// separate API shape per override. If DEFAULT_POINT_TABLES in
+// contests/page.js ever drifts from these two arrays, the frontend's
+// "blank means use the default" behavior will silently use the wrong
+// default -- keep them in sync.
+//
 // Indexed by rank - 1 (rank 1 -> POINT_TABLE[0]). Sized for a 12-team
 // league; a team placing beyond this list scores 0.
 const POINT_TABLE = [12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
@@ -193,6 +205,11 @@ export async function GET(request) {
   // Sums a set of ranked rows into manager -> cumulative { contest_points,
   // fantasy_points }, the same reduction used for both the real leaderboard
   // and the "as of last week" snapshot used for rank-movement arrows below.
+  // byWeek keeps the raw rank and fantasy points too (not just the
+  // placement points from the *default* table), not needed for the totals
+  // here but carried through into buildLeaderboard's output below so the
+  // frontend can re-derive placement points from a user-supplied custom
+  // table without another round trip -- see weekly_rank/weekly_fantasy.
   function sumByManager(rows) {
     const totals = new Map();
     for (const r of rows) {
@@ -200,7 +217,7 @@ export async function GET(request) {
       const t = totals.get(r.manager);
       t.contest_points += r.placement_points;
       t.fantasy_points += r.points;
-      t.byWeek[r.week] = r.placement_points;
+      t.byWeek[r.week] = { rank: r.rank, points: r.points, placement_points: r.placement_points };
     }
     return totals;
   }
@@ -248,7 +265,15 @@ export async function GET(request) {
         team: managerTeam.get(manager) ?? manager,
         contest_points: t.contest_points,
         fantasy_points: Number(t.fantasy_points.toFixed(2)),
-        weekly_points: contestWeeks.map((wk) => t.byWeek[wk] ?? null),
+        weekly_points: contestWeeks.map((wk) => t.byWeek[wk]?.placement_points ?? null),
+        // Raw weekly placement (1st, 2nd, ...) and raw weekly fantasy score,
+        // independent of any point table -- lets the frontend recompute
+        // weekly_points/contest_points/rank/rankDelta for a custom point
+        // system entirely client-side (see the "Change Point System"
+        // editor in contests/page.js) without needing a new API shape per
+        // custom table.
+        weekly_rank: contestWeeks.map((wk) => t.byWeek[wk]?.rank ?? null),
+        weekly_fantasy: contestWeeks.map((wk) => t.byWeek[wk]?.points ?? null),
       }))
       // Sort by contest (placement) points, not fantasy points. Fantasy
       // points only break ties.
