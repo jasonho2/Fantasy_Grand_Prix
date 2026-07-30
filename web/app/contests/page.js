@@ -106,17 +106,16 @@ function ContestPanel({ contest }) {
         <span className={`badge ${STATUS_BADGE_CLASS[contest.status]}`}>{STATUS_LABEL[contest.status]}</span>
       </h2>
 
-      {/* Two independent toggle groups sharing one wrapping flex row: "Sort
-          by" first in DOM order so it lands on the first line if there's
-          only room for one group per line (narrow/mobile), "Mode" second so
-          it either shares that line when there's space, or drops to its
-          own line below. Wider column-gap than the default .controls gap
-          so the two groups read as visually distinct, not crowded together
-          -- row-gap (used once they wrap onto separate lines) stays at the
-          usual spacing. */}
-      <div className="controls" style={{ marginBottom: 12, gap: "10px 28px" }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Sort by:</span>
+      {/* Two independent toggle groups (Sort by, then Mode) laid out on a
+          shared grid -- see .toggle-grid in globals.css. Wide enough
+          screens get both groups on one row; narrow/mobile drops to a
+          two-column grid, which stacks Mode under Sort by while still
+          keeping both labels the same width and both button groups
+          starting at the same x, instead of each row being staggered by
+          its own label's length. */}
+      <div className="toggle-grid" style={{ marginBottom: 12 }}>
+        <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Sort by:</span>
+        <div className="toggle-grid-buttons">
           <button
             type="button"
             className={`week-chip${sortBy === "contest_points" ? " selected" : ""}`}
@@ -132,8 +131,8 @@ function ContestPanel({ contest }) {
             Fantasy Points (ref)
           </button>
         </div>
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Mode:</span>
+        <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Mode:</span>
+        <div className="toggle-grid-buttons">
           <button
             type="button"
             className={`week-chip${mode === "solo" ? " selected" : ""}`}
