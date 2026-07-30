@@ -167,17 +167,20 @@ edit the `cron:` line in the workflow file to change that. You can also
 trigger a pull on demand any time from the repo's **Actions** tab ->
 "Pull fantasy data" -> **Run workflow**, no terminal needed.
 
-Standings, Contests (Grand Prix), and final matchup results only update
-once ESPN marks a week fully decided -- in practice, Tuesday morning after
-Monday Night Football. The Matchups & Schedule page is the exception: it
-also shows the single week currently being played, tagged **LIVE**, with
-scores pulled fresh from that week's boxscore (so they climb throughout
-Sunday/Monday as players' stat lines come in) -- but that data is
-provisional and deliberately excluded from Standings/Contests until the
-week is actually final, so a mid-game glimpse never causes a win-loss
-record or a cup ranking to flicker. Every page shows a small "Data as of
-[time]" note (in Nav) noting when the pipeline last checked, regardless of
-whether anything changed.
+The Season Leaderboard (win-loss records) and final matchup results only
+update once ESPN marks a week fully decided -- in practice, Tuesday
+morning after Monday Night Football; a matchup's winner genuinely can't be
+known any earlier than that. The Matchups & Schedule page and the Grand
+Prix cup standings are the exception: both also reflect the single week
+currently being played, tagged **LIVE**, with scores pulled fresh from
+that week's boxscore each run (so they climb throughout Sunday/Monday as
+players' stat lines come in). That data is provisional -- once ESPN
+finalizes the week, the real decided-week numbers take over automatically
+on the next sync -- but a cup's point-total ranking (unlike a win-loss
+record) is meaningful to show live, so it isn't held back the way
+Standings is. Every page shows a small "Data as of [time]" note (in Nav)
+noting when the pipeline last checked, regardless of whether anything
+changed.
 
 If a league or a season within it isn't available (e.g. next year's ESPN
 league hasn't been rolled over yet, or a Sleeper league id is wrong), that

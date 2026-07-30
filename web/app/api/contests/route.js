@@ -93,24 +93,78 @@ export async function GET(request) {
      ORDER BY wmp.week, wmp.points DESC`,
     [season, league]
   );
+  // The last week ESPN has actually decided -- used below to gate a cup's
+  // "final" status. Computed before merging in the live week (below) since
+  // an in-progress week should never count as "decided" for that purpose,
+  // even once its provisional scores are folded into the rankings.
+  const maxDecidedWeek = weeklyRows.reduce((m, r) => Math.max(m, r.week), 0);
+
+  // The single week currently being played (if any) -- provisional scores
+  // pulled fresh each pipeline run, same bonus-free starter-point source as
+  // every decided week (see live_matchups' schema comment in db.py and
+  // api/matchups/route.js). Folded directly into the same ranking pipeline
+  // as decided weeks below (not a separate code path) specifically so cup
+  // standings move live as games happen, not just once a week is final --
+  // the moment ESPN decides this week, live_matchups empties out and the
+  // real decided-week data takes over here automatically on the next pull.
+  const liveRows = await query(
+    `SELECT lm.week,
+            hm.manager_name AS home_manager,
+            ht.team_name AS home_team,
+            lm.home_points,
+            am.manager_name AS away_manager,
+            at.team_name AS away_team,
+            lm.away_points,
+            lm.is_bye
+     FROM live_matchups lm
+     JOIN teams ht ON ht.team_id = lm.home_team_id
+     JOIN managers hm ON hm.manager_id = ht.manager_id
+     LEFT JOIN teams at ON at.team_id = lm.away_team_id
+     LEFT JOIN managers am ON am.manager_id = at.manager_id
+     WHERE lm.season = ? AND lm.league_id = (SELECT league_id FROM leagues WHERE slug = ?)
+     ORDER BY lm.week`,
+    [season, league]
+  ).catch(() => []); // tolerate a not-yet-migrated DB that lacks live_matchups
+
+  const liveWeek = liveRows[0]?.week ?? null; // at most one live week ever exists at a time
+  const liveWeeklyRows = []; // same shape as weeklyRows
+  const liveMatchupRows = []; // same shape as matchupRows, below
+  for (const row of liveRows) {
+    liveWeeklyRows.push({ week: row.week, manager: row.home_manager, team: row.home_team, points: row.home_points });
+    if (!row.is_bye && row.away_manager != null) {
+      liveWeeklyRows.push({ week: row.week, manager: row.away_manager, team: row.away_team, points: row.away_points });
+    }
+    liveMatchupRows.push({
+      week: row.week,
+      home_manager: row.home_manager,
+      away_manager: row.is_bye ? null : row.away_manager,
+      is_bye: !!row.is_bye,
+    });
+  }
+
+  // Everything below (Solo ranking, Double Dash pairing, managerTeam) reads
+  // from allWeeklyRows/allMatchupRows rather than weeklyRows/matchupRows
+  // directly, so the live week is ranked and paired exactly like any
+  // decided week -- no separate logic to keep in sync.
+  const allWeeklyRows = [...weeklyRows, ...liveWeeklyRows];
 
   // A manager maps to exactly one team for the season -- grab that mapping
   // once so the leaderboard can be built/grouped by manager (a stable key)
   // while still surfacing the team name for display.
   const managerTeam = new Map();
-  for (const row of weeklyRows) {
+  for (const row of allWeeklyRows) {
     if (!managerTeam.has(row.manager)) managerTeam.set(row.manager, row.team);
   }
 
   // Rank each week's teams by that week's fantasy points, assign placement points.
   const byWeek = new Map();
-  for (const row of weeklyRows) {
+  for (const row of allWeeklyRows) {
     if (!byWeek.has(row.week)) byWeek.set(row.week, []);
     byWeek.get(row.week).push(row);
   }
 
   const ranked = []; // { week, manager, points, rank, placement_points }
-  let maxWeek = 0;
+  let maxWeek = 0; // latest week with ANY data, decided or live -- see maxDecidedWeek above for "final" gating
   for (const [week, teams] of byWeek) {
     maxWeek = Math.max(maxWeek, week);
     teams.sort((a, b) => b.points - a.points); // rows already came sorted; be explicit anyway
@@ -143,13 +197,17 @@ export async function GET(request) {
      ORDER BY mu.week`,
     [season, league]
   );
+  // Live week's pairings (built above from live_matchups) folded in the
+  // same way as allWeeklyRows above -- the pairing loop below doesn't need
+  // to know or care that this week isn't decided yet.
+  const allMatchupRows = [...matchupRows, ...liveMatchupRows];
 
-  // week -> manager -> points, straight off weeklyRows (already fetched
-  // above for Solo) -- the bonus-free source of truth for what everyone
-  // actually scored that week, including teams a matchup row might not
-  // capture (see weekly_manager_points' own comment in db.py).
+  // week -> manager -> points, straight off allWeeklyRows (Solo's decided
+  // + live rows from above) -- the bonus-free source of truth for what
+  // everyone actually scored that week, including teams a matchup row
+  // might not capture (see weekly_manager_points' own comment in db.py).
   const pointsByWeek = new Map();
-  for (const row of weeklyRows) {
+  for (const row of allWeeklyRows) {
     if (!pointsByWeek.has(row.week)) pointsByWeek.set(row.week, new Map());
     pointsByWeek.get(row.week).set(row.manager, row.points);
   }
@@ -157,7 +215,7 @@ export async function GET(request) {
   const pairsByWeek = new Map(); // week -> [{ pairScore, members: [{manager, points}, ...] }]
   const pairedManagersByWeek = new Map(); // week -> Set(manager) -- who's already covered by a real pair
 
-  for (const row of matchupRows) {
+  for (const row of allMatchupRows) {
     if (row.is_bye || row.away_manager == null) continue; // no opponent -- handled in the sweep below
     const weekPoints = pointsByWeek.get(row.week) || new Map();
     const homePoints = weekPoints.get(row.home_manager) ?? 0;
@@ -300,11 +358,18 @@ export async function GET(request) {
       start_week: w.start_week,
       end_week: w.end_week,
       weeks: contestWeeks,
-      status: maxWeek >= w.end_week ? "final" : maxWeek >= w.start_week ? "in_progress" : "upcoming",
+      // "final" requires the cup's last week to be actually decided, not
+      // just live -- maxDecidedWeek (not maxWeek) gates that, so a cup
+      // whose final week is the one currently being played correctly stays
+      // "in_progress" (via maxWeek, which does include the live week) until
+      // ESPN calls it, instead of flashing "Final" early.
+      status:
+        maxDecidedWeek >= w.end_week ? "final" : maxWeek >= w.start_week ? "in_progress" : "upcoming",
+      liveWeek: liveWeek != null && liveWeek >= w.start_week && liveWeek <= w.end_week ? liveWeek : null,
       leaderboard: buildLeaderboard(ranked, w),
       doubleDashLeaderboard: buildLeaderboard(doubleDashRanked, w),
     };
   });
 
-  return Response.json({ season, maxWeek, leagueName, contests });
+  return Response.json({ season, maxWeek, maxDecidedWeek, liveWeek, leagueName, contests });
 }

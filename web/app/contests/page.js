@@ -504,7 +504,14 @@ function ContestPanel({ contest, league, season }) {
                 <th>Rank</th>
                 <th className="sticky-col">Team</th>
                 {contest.weeks.map((wk) => (
-                  <th key={wk}>Wk {wk}</th>
+                  <th key={wk} title={wk === contest.liveWeek ? "Game in progress -- scores still updating" : undefined}>
+                    Wk {wk}
+                    {wk === contest.liveWeek && (
+                      <span className="badge tie" style={{ marginLeft: 4 }}>
+                        LIVE
+                      </span>
+                    )}
+                  </th>
                 ))}
                 <th>Total</th>
                 <th title="Fantasy Points (ref)">PF</th>
@@ -640,7 +647,10 @@ function ContestsInner() {
         teammates earn the full placement points for wherever their pair landed (1st: 12, 2nd: 10,
         3rd: 9, 4th: 8, 5th: 7, 6th: 5). Either way, placement points accumulate within a cup&apos;s
         weeks and determine the ranking below by default; use the sort toggle on each cup to rank
-        by total fantasy points instead, which is otherwise shown for reference only.
+        by total fantasy points instead, which is otherwise shown for reference only. While a week
+        is being played, that week&apos;s column is marked <strong>LIVE</strong> and the standings
+        below already reflect its still-updating scores -- once ESPN finalizes the week, the
+        provisional numbers are replaced with the real ones on the next data sync.
       </p>
 
       {loading && <div className="loading-state">Loading contests...</div>}

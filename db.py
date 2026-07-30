@@ -88,12 +88,16 @@ live_matchups           one row per team for whichever single week is
                         it as live and the next run's replace naturally
                         empties this table for that league/season -- real
                         matchup data then flows through the normal
-                        `matchups` table/pipeline as always. Standings and
-                        Contests never read this table, only
-                        api/matchups/route.js does (merged into the
-                        schedule response with is_live: true) -- a
-                        mid-game glimpse should never affect a W-L record
-                        or a cup ranking before the week is actually final.
+                        `matchups` table/pipeline as always. Read by
+                        api/matchups/route.js (merged into the schedule
+                        response with is_live: true) and by
+                        api/contests/route.js (folded straight into the
+                        same Solo/Double Dash ranking pipeline as decided
+                        weeks, so cup point totals move live) -- but NOT by
+                        api/standings/route.js, which only reads the real
+                        `matchups` table: a W-L record can't be known until
+                        a matchup is actually decided the way a point-total
+                        cup ranking reasonably can be shown provisionally.
                         Points here come from a fresh boxscore pull
                         (starter stat lines), same bonus-free source as
                         every decided week and every bye week -- never
