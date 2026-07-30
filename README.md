@@ -161,11 +161,23 @@ into any `"platform": "espn"` entries, then runs `pipeline.py` pointed at
 Turso via the other two secrets. Nothing sensitive is ever committed to
 the repo.
 
-It's scheduled for every 30 minutes on Thursday/Sunday/Monday (the NFL's
+It's scheduled for every 5 minutes on Thursday/Sunday/Monday (the NFL's
 primary game days) to avoid burning Actions minutes the rest of the week --
 edit the `cron:` line in the workflow file to change that. You can also
 trigger a pull on demand any time from the repo's **Actions** tab ->
 "Pull fantasy data" -> **Run workflow**, no terminal needed.
+
+Standings, Contests (Grand Prix), and final matchup results only update
+once ESPN marks a week fully decided -- in practice, Tuesday morning after
+Monday Night Football. The Matchups & Schedule page is the exception: it
+also shows the single week currently being played, tagged **LIVE**, with
+scores pulled fresh from that week's boxscore (so they climb throughout
+Sunday/Monday as players' stat lines come in) -- but that data is
+provisional and deliberately excluded from Standings/Contests until the
+week is actually final, so a mid-game glimpse never causes a win-loss
+record or a cup ranking to flicker. Every page shows a small "Data as of
+[time]" note (in Nav) noting when the pipeline last checked, regardless of
+whether anything changed.
 
 If a league or a season within it isn't available (e.g. next year's ESPN
 league hasn't been rolled over yet, or a Sleeper league id is wrong), that

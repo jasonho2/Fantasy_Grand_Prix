@@ -51,6 +51,8 @@ nav.topnav {
 .topnav-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 2px;
   gap: 12px;
   margin-right: auto;
 }

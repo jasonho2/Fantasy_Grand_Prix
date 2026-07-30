@@ -14,7 +14,14 @@ export async function GET(request) {
   ).catch(() => []); // tolerate a not-yet-migrated DB that lacks the leagues table
 
   if (leagues.length === 0) {
-    return Response.json({ leagues: [], league: null, seasons: [], managers: [], leagueName: null });
+    return Response.json({
+      leagues: [],
+      league: null,
+      seasons: [],
+      managers: [],
+      leagueName: null,
+      lastPulledAt: null,
+    });
   }
 
   const activeSlug = leagues.some((l) => l.slug === requestedSlug) ? requestedSlug : leagues[0].slug;
@@ -41,11 +48,20 @@ export async function GET(request) {
     [activeSlug]
   );
 
+  // When the pipeline last touched this league at all -- not "when did the
+  // data last change," just "when did we last check" (see
+  // db.touch_last_pulled_at). Powers the "Data as of [time]" indicator in
+  // Nav, which fetches this same /api/meta response on every page.
+  const pulledAtRows = await query("SELECT last_pulled_at FROM leagues WHERE slug = ?", [activeSlug]).catch(
+    () => [] // tolerate a not-yet-migrated DB that lacks the last_pulled_at column
+  );
+
   return Response.json({
     leagues,
     league: activeSlug,
     seasons: seasons.map((r) => r.season),
     managers: managers.map((r) => r.manager_name),
     leagueName: nameRows[0]?.name ?? null,
+    lastPulledAt: pulledAtRows[0]?.last_pulled_at ?? null,
   });
 }

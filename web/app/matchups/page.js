@@ -23,7 +23,11 @@ function computeRunningRecords(rows) {
 
   for (const week of weeks) {
     for (const row of rows.filter((r) => r.week === week)) {
-      if (row.is_bye || !row.away_team) continue;
+      // row.winner is null for a live/in-progress week -- excluded
+      // explicitly (not just relying on none of the ===HOME/AWAY/TIE
+      // checks below matching null) so a mid-game glimpse never counts
+      // toward a W-L record before the week is actually decided.
+      if (row.is_bye || !row.away_team || row.winner == null) continue;
       const home = running.get(row.home_team);
       const away = running.get(row.away_team);
       if (row.winner === "TIE") {
@@ -61,7 +65,11 @@ function groupByWeek(rows) {
 function headToHead(rows) {
   const pairs = new Map(); // key: sorted "A|B" -> { a, b, aWins, bWins, ties }
   for (const row of rows) {
-    if (row.is_bye || !row.away_team) continue;
+    // row.winner is null for a live/in-progress week (see api/matchups/
+    // route.js) -- must be excluded explicitly, not just is_bye/no-opponent,
+    // otherwise the winnerTeam ternary below has no "undecided" case and
+    // would silently credit the away team with a win it hasn't earned yet.
+    if (row.is_bye || !row.away_team || row.winner == null) continue;
     const [a, b] = [row.home_team, row.away_team].sort();
     const key = `${a}|${b}`;
     if (!pairs.has(key)) pairs.set(key, { a, b, aWins: 0, bWins: 0, ties: 0 });
@@ -167,7 +175,20 @@ function MatchupsInner() {
                               {row.home_team}
                               {homeRec && <span style={recordStyle}> ({homeRec})</span>}
                             </td>
-                            <td title={row.is_bye ? "Starter points scored (bye week)" : undefined}>
+                            <td
+                              title={
+                                row.is_live
+                                  ? "Live -- starter points scored so far this week, not yet final"
+                                  : row.is_bye
+                                  ? "Starter points scored (bye week)"
+                                  : undefined
+                              }
+                            >
+                              {row.is_live && (
+                                <span className="badge tie" style={{ marginRight: 6 }}>
+                                  LIVE
+                                </span>
+                              )}
                               {row.home_points?.toFixed?.(1) ?? row.home_points}
                               {!row.is_bye && row.away_points != null && ` - ${row.away_points.toFixed?.(1) ?? row.away_points}`}
                             </td>

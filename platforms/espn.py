@@ -8,6 +8,8 @@ platform_player_id) so the loader code in db.py doesn't need to know which
 platform a row came from.
 """
 
+import sys
+
 import requests
 
 CURRENT_API = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{year}/segments/0/leagues/{league_id}"
@@ -177,15 +179,63 @@ def build_manager_map(raw):
 
 
 def build_matchup_records(raw, year, team_manager):
-    """Returns (matchup_records, played_weeks). Only weeks that have
-    actually been played (winner != "UNDECIDED") are included."""
+    """Returns (matchup_records, played_weeks, live_week, live_pairings).
+
+    matchup_records/played_weeks: unchanged behavior from before -- only
+    matchups ESPN has fully decided (winner != "UNDECIDED") are included,
+    scored from ESPN's own totalPoints for that (finished) week.
+
+    live_week: the single earliest not-yet-decided matchupPeriodId, if any.
+    Every week before it is already decided (the schedule is processed in
+    order and a week is only marked decided once it's actually over), and
+    every week after it hasn't started yet -- so this is "the week
+    currently being played" during the season, and None the rest of the
+    time (preseason, or once every week is final). This is a schema-shape-
+    agnostic way to find the live week: it only relies on winner ==
+    "UNDECIDED", the same field this function already reads, rather than
+    guessing at some other ESPN status field.
+
+    live_pairings: that live week's home/away team pairings only (matchup
+    id, both team ids, whether it's a bye) -- deliberately NOT points.
+    ESPN's own totalPoints for an in-progress week is usable, but the
+    caller (pull_season) instead re-derives live points from a fresh
+    boxscore pull, the same starter-sum source used for every decided
+    week and for bye weeks (see api/matchups/route.js's bonus-exclusion
+    comment) -- so a live score is never a moving target that later turns
+    out to have included some correction that decided weeks don't get
+    until the week is actually final.
+    """
     matchup_records = []
     weeks = set()
+    undecided_weeks = set()
     for m in raw.get("schedule", []):
         if m.get("winner") == "UNDECIDED":
-            continue  # not played yet
+            undecided_weeks.add(m.get("matchupPeriodId"))
 
+    live_week = min(undecided_weeks) if undecided_weeks else None
+    live_pairings = []
+
+    for m in raw.get("schedule", []):
         week = m.get("matchupPeriodId")
+        winner = m.get("winner")
+
+        if winner == "UNDECIDED":
+            if week == live_week:
+                home = m.get("home") or {}
+                away = m.get("away") or {}
+                home_id = home.get("teamId")
+                away_id = away.get("teamId")
+                live_pairings.append(
+                    {
+                        "week": week,
+                        "matchup_id": m.get("id"),
+                        "home_platform_team_id": home_id,
+                        "away_platform_team_id": away_id,
+                        "is_bye": away_id is None,
+                    }
+                )
+            continue  # not decided -- either the live week (handled above) or further out and not started
+
         home = m.get("home") or {}
         away = m.get("away") or {}
         home_id = home.get("teamId")
@@ -193,7 +243,6 @@ def build_matchup_records(raw, year, team_manager):
         home_pts = home.get("totalPoints")
         away_pts = away.get("totalPoints")
         is_bye = away_id is None
-        winner = m.get("winner")
 
         weeks.add(week)
         matchup_records.append(
@@ -208,7 +257,7 @@ def build_matchup_records(raw, year, team_manager):
                 "is_bye": is_bye,
             }
         )
-    return matchup_records, sorted(weeks)
+    return matchup_records, sorted(weeks), live_week, live_pairings
 
 
 def build_player_points_rows(league_id, year, weeks, team_manager, team_name, espn_s2, swid):
@@ -239,10 +288,51 @@ def pull_season(conn, league_config, year, external_season_id):
     raw = fetch_league_json(external_season_id, year, espn_s2, swid)
     league_name = raw.get("settings", {}).get("name")
     team_manager, team_name = build_manager_map(raw)
-    matchup_records, played_weeks = build_matchup_records(raw, year, team_manager)
+    matchup_records, played_weeks, live_week, live_pairings = build_matchup_records(raw, year, team_manager)
     player_rows = build_player_points_rows(
         external_season_id, year, played_weeks, team_manager, team_name, espn_s2, swid
     )
+
+    # If a week is currently being played, pull its boxscore too (a second,
+    # separate fetch -- not part of played_weeks/player_rows above, which
+    # stays scoped to fully decided weeks exactly like before) and turn it
+    # into provisional live_matchup_records for that one week. Wrapped in
+    # its own try/except: a live pull is a nice-to-have on top of the
+    # decided-week data this function already reliably returns, so a
+    # transient hiccup fetching the in-progress boxscore (e.g. ESPN briefly
+    # erroring mid-game) should never take down the whole season's pull --
+    # it just means this run doesn't have a live update, and the next
+    # scheduled run (5 minutes later on a game day) tries again.
+    live_matchup_records = []
+    if live_week is not None and live_pairings:
+        try:
+            live_player_rows = build_player_points_rows(
+                external_season_id, year, [live_week], team_manager, team_name, espn_s2, swid
+            )
+            live_points_by_team = {}
+            for row in live_player_rows:
+                tid = row["platform_team_id"]
+                live_points_by_team[tid] = round(
+                    live_points_by_team.get(tid, 0.0) + (row["points"] or 0.0), 2
+                )
+
+            for pairing in live_pairings:
+                home_id = pairing["home_platform_team_id"]
+                away_id = pairing["away_platform_team_id"]
+                live_matchup_records.append(
+                    {
+                        "week": pairing["week"],
+                        "matchup_id": pairing["matchup_id"],
+                        "home_platform_team_id": home_id,
+                        "away_platform_team_id": away_id,
+                        "home_points": live_points_by_team.get(home_id, 0.0),
+                        "away_points": live_points_by_team.get(away_id) if away_id is not None else None,
+                        "is_bye": pairing["is_bye"],
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001 -- see comment above
+            print(f"    Could not pull live week {live_week}: {exc}", file=sys.stderr)
+            live_matchup_records = []
 
     return {
         "platform": PLATFORM,
@@ -252,4 +342,6 @@ def pull_season(conn, league_config, year, external_season_id):
         "team_name": team_name,
         "player_rows": player_rows,
         "matchup_records": matchup_records,
+        "live_week": live_week,
+        "live_matchup_records": live_matchup_records,
     }

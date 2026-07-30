@@ -102,6 +102,11 @@ def _pull_one_league(conn, league_cfg):
         espn_swid=league_cfg.get("espn_swid"),
         sleeper_league_id=league_cfg.get("sleeper_league_id"),
     )
+    # Marks "we just started refreshing this league" for the UI's "Data as
+    # of [time]" indicator -- set once up front (not per-year, and not only
+    # on success) so it reflects this run's wall-clock time even if an
+    # individual year below hits an error and gets skipped.
+    db_module.touch_last_pulled_at(conn, league_id)
 
     # An empty/missing "years" means "discover everything this platform
     # knows about" -- true for every self-service Sleeper league (see
@@ -136,6 +141,7 @@ def _pull_one_league(conn, league_cfg):
                 data["team_name"],
                 data["player_rows"],
                 data["matchup_records"],
+                data.get("live_matchup_records"),
             )
             reg_weeks = (
                 regular_season_weeks_config.get(year)
@@ -145,9 +151,14 @@ def _pull_one_league(conn, league_cfg):
             db_module.set_league_season_info(
                 conn, league_id, year, data["external_id"], data["league_name"], reg_weeks
             )
+            live_note = (
+                f", week {data['live_week']} live ({len(data.get('live_matchup_records') or [])} teams)"
+                if data.get("live_week") is not None
+                else ""
+            )
             print(
                 f"    {len(data['player_rows'])} player-week rows, "
-                f"{len(data['matchup_records'])} matchup rows -- loaded."
+                f"{len(data['matchup_records'])} matchup rows -- loaded{live_note}."
             )
 
             windows = contests_config.get(year) or contests_config.get(str(year))

@@ -32,6 +32,12 @@ Schema
 leagues                 one row per registered league (platform + credentials
                          + a URL-friendly slug). This is the "tenant" --
                          everything else hangs off league_id.
+                         last_pulled_at is touched once per pipeline run
+                         that processes this league (see
+                         touch_last_pulled_at()), regardless of whether
+                         anything actually changed -- it's what powers the
+                         "Data as of [time]" indicator in the UI, not a
+                         signal about data changing.
 league_seasons          one row per (league, season): that season's
                          platform-side id (ESPN's league id repeats every
                          season; Sleeper's changes every season and is
@@ -70,6 +76,28 @@ contest_windows         one row per side-contest window (e.g. weeks 1-4,
                         set_contest_windows(). A manager's score in a contest
                         is just the sum of weekly_manager_points over that
                         window's weeks (computed at query time, not stored).
+live_matchups           one row per team for whichever single week is
+                        currently being played (if any), scoped by
+                        league_id + season same as matchups. Deliberately
+                        NOT a history table -- load_season() replaces this
+                        league/season's rows wholesale (delete then
+                        insert) every pipeline run, so it only ever holds
+                        "whatever's live right now," never anything from a
+                        week that's since been decided. Once ESPN marks
+                        that week final, platforms/espn.py stops returning
+                        it as live and the next run's replace naturally
+                        empties this table for that league/season -- real
+                        matchup data then flows through the normal
+                        `matchups` table/pipeline as always. Standings and
+                        Contests never read this table, only
+                        api/matchups/route.js does (merged into the
+                        schedule response with is_live: true) -- a
+                        mid-game glimpse should never affect a W-L record
+                        or a cup ranking before the week is actually final.
+                        Points here come from a fresh boxscore pull
+                        (starter stat lines), same bonus-free source as
+                        every decided week and every bye week -- never
+                        ESPN's live totalPoints directly.
 """
 
 import os
@@ -191,6 +219,23 @@ CREATE VIEW weekly_manager_points AS
     FROM weekly_player_points
     GROUP BY season, week, team_id;
 
+-- Wholesale-replaced every pipeline run (see the docstring's live_matchups
+-- entry above for why) -- no platform_matchup_id / upsert-by-id needed
+-- since there's never more than one snapshot in flight per league/season.
+CREATE TABLE IF NOT EXISTS live_matchups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id INTEGER NOT NULL REFERENCES leagues(league_id),
+    season INTEGER NOT NULL,
+    week INTEGER NOT NULL,
+    home_team_id INTEGER NOT NULL REFERENCES teams(team_id),
+    away_team_id INTEGER REFERENCES teams(team_id),
+    home_points REAL,
+    away_points REAL,
+    is_bye INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_live_matchups_league_season ON live_matchups(league_id, season);
+
 CREATE TABLE IF NOT EXISTS contest_windows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     league_id INTEGER NOT NULL REFERENCES leagues(league_id),
@@ -205,7 +250,8 @@ CREATE INDEX IF NOT EXISTS idx_contest_windows_league_season ON contest_windows(
 
 -- Small cache of "when did we last do X" markers. Currently used to respect
 -- Sleeper's guidance to pull their ~5MB full-player-list endpoint at most
--- once a day, even though the pipeline itself may run every 30 minutes.
+-- once a day, even though the pipeline itself may run every 5 minutes on
+-- game days.
 CREATE TABLE IF NOT EXISTS platform_sync_state (
     key TEXT PRIMARY KEY,
     value TEXT,
@@ -275,6 +321,7 @@ def _migrate_legacy_single_league_schema(conn):
 # if the column is actually missing.
 COLUMN_MIGRATIONS = [
     ("leagues", "pull_years", "TEXT"),
+    ("leagues", "last_pulled_at", "TEXT"),
 ]
 
 
@@ -376,6 +423,17 @@ def get_or_create_league(
         league_id = row[0]
     conn.commit()
     return league_id
+
+
+def touch_last_pulled_at(conn, league_id):
+    """Stamps leagues.last_pulled_at with the current time -- called once per
+    league per pipeline run (see pipeline.py), regardless of whether any
+    individual season's pull succeeded or failed, since even a partial run
+    freshens whatever did load. Purely a "when did we last check" marker
+    for the UI's "Data as of [time]" display, not a signal that anything
+    actually changed."""
+    conn.execute("UPDATE leagues SET last_pulled_at = datetime('now') WHERE league_id = ?", (league_id,))
+    conn.commit()
 
 
 def list_leagues(conn):
@@ -513,7 +571,9 @@ def get_or_create_player(conn, platform, platform_player_id, name, position):
     return row[0]
 
 
-def load_season(conn, league_id, platform, year, team_manager, team_name, player_rows, matchup_records):
+def load_season(
+    conn, league_id, platform, year, team_manager, team_name, player_rows, matchup_records, live_matchup_records=None
+):
     """
     league_id: internal leagues.league_id (see get_or_create_league)
     platform: 'espn' | 'sleeper' -- used to scope player dedup
@@ -522,6 +582,16 @@ def load_season(conn, league_id, platform, year, team_manager, team_name, player
     player_rows: list of dicts (must include platform_team_id and platform_player_id)
     matchup_records: list of dicts with home_platform_team_id/away_platform_team_id
                       (raw platform team ids, not names)
+    live_matchup_records: same shape as matchup_records, but for the single
+                      week currently in progress (if any) -- see the
+                      live_matchups table's schema comment up top. Always
+                      fully replaces this league/season's live_matchups rows
+                      (delete then insert), including clearing them to
+                      empty when this is None/[] (e.g. Sleeper pulls, which
+                      don't have a live-week concept, or an ESPN pull where
+                      every week is currently decided) -- so a week that WAS
+                      live in a previous run and has since been decided
+                      doesn't leave a stale row behind.
     """
     team_id_map = {}  # platform_team_id (as given) -> internal teams.team_id
     for platform_team_id, manager_name in team_manager.items():
@@ -570,6 +640,36 @@ def load_season(conn, league_id, platform, year, team_manager, team_name, player
                 m["home_points"],
                 m["away_points"],
                 m["winner"],
+                int(m["is_bye"]),
+            ),
+        )
+
+    # Always a full replace, never an upsert -- this table only ever holds
+    # a snapshot of whatever's live *right now* for this league/season (or
+    # nothing), not accumulated history. Running this on every load_season()
+    # call (even when live_matchup_records is empty) is what clears a
+    # previously-live week's row once it's been decided and moved over to
+    # the real `matchups` table above.
+    conn.execute("DELETE FROM live_matchups WHERE league_id = ? AND season = ?", (league_id, year))
+    for m in live_matchup_records or []:
+        home_team_id = team_id_map.get(m["home_platform_team_id"])
+        away_team_id = (
+            team_id_map.get(m["away_platform_team_id"]) if m.get("away_platform_team_id") is not None else None
+        )
+        if home_team_id is None:
+            continue
+        conn.execute(
+            """INSERT INTO live_matchups (league_id, season, week, home_team_id, away_team_id,
+                                            home_points, away_points, is_bye, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+            (
+                league_id,
+                year,
+                m["week"],
+                home_team_id,
+                away_team_id,
+                m["home_points"],
+                m["away_points"],
                 int(m["is_bye"]),
             ),
         )

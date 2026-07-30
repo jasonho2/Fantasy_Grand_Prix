@@ -7,13 +7,22 @@ name: Pull fantasy data
 # get picked up automatically on the next scheduled run -- there's no
 # separate "corrections" step.
 #
-# Schedule: every 30 minutes, but only on the NFL's primary game days
+# Schedule: every 5 minutes, but only on the NFL's primary game days
 # (Thu/Sun/Mon) to avoid burning Actions minutes the rest of the week.
 # Adjust the cron expression below, or just use "Run workflow" in the
 # Actions tab for an on-demand pull any time.
+#
+# Every-5-minutes is specifically so the Matchups page's live in-progress
+# scores (see platforms/espn.py's live_week detection, and the
+# live_matchups table in db.py) stay close to real-time during games, not
+# just so Tuesday's final stat corrections land a little faster -- a
+# decided week would show up just as correctly on a slower cadence.
+# GitHub's own scheduling is best-effort, not exact -- a run can slip by a
+# few minutes during periods of high platform load, so "every 5 minutes"
+# means "about every 5 minutes," not a hard guarantee.
 on:
   schedule:
-    - cron: "*/30 * * * 0,1,4"
+    - cron: "*/5 * * * 0,1,4"
   workflow_dispatch: {}
 
 jobs:

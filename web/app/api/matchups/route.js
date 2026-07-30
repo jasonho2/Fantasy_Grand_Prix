@@ -42,9 +42,40 @@ export async function GET(request) {
     [season, league]
   );
 
-  const rows = rawRows.map(({ home_starter_points, ...row }) =>
+  const decidedRows = rawRows.map(({ home_starter_points, ...row }) =>
     row.is_bye && home_starter_points != null ? { ...row, home_points: home_starter_points } : row
   );
+
+  // The current in-progress week (if any) never has a row in `matchups`
+  // yet -- ESPN hasn't decided it -- so it lives in a separate table that
+  // the pipeline fully replaces every run (see live_matchups' schema
+  // comment in db.py). Points here already come from a fresh boxscore
+  // pull (starter stat lines), same bonus-free source as decided weeks
+  // and byes above, not ESPN's live totalPoints. is_live marks these rows
+  // so the frontend can badge them and, more importantly, so nothing
+  // downstream mistakes a provisional score for a final one -- winner is
+  // deliberately left null/undefined here rather than guessed, since
+  // Standings/Contests-style win-loss logic already treats a missing
+  // winner as "not decided yet, don't count it."
+  const liveRows = await query(
+    `SELECT lm.week,
+            ht.team_name AS home_team,
+            at.team_name AS away_team,
+            lm.home_points,
+            lm.away_points,
+            lm.is_bye
+     FROM live_matchups lm
+     JOIN teams ht ON ht.team_id = lm.home_team_id
+     LEFT JOIN teams at ON at.team_id = lm.away_team_id
+     WHERE lm.season = ? AND lm.league_id = (SELECT league_id FROM leagues WHERE slug = ?)
+     ORDER BY lm.week`,
+    [season, league]
+  ).catch(() => []); // tolerate a not-yet-migrated DB that lacks live_matchups
+
+  const rows = [
+    ...decidedRows,
+    ...liveRows.map((row) => ({ ...row, winner: null, is_live: true })),
+  ];
 
   return Response.json({ season, rows });
 }

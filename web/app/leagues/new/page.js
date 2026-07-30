@@ -394,7 +394,7 @@ export default function AddLeaguePage() {
       <div className="panel" style={{ maxWidth: 520, background: "rgba(62,207,142,0.08)", borderColor: "var(--win)" }}>
         <strong>{result.displayName}</strong> is registered.
         <p style={{ color: "var(--text-dim)", fontSize: 14 }}>
-          It&apos;ll show up in the league switcher once the next data sync runs (every 30
+          It&apos;ll show up in the league switcher once the next data sync runs (every 5
           minutes during the season, or sooner if the site owner triggers one manually) and pulls
           its {result.years ? `${result.years.join(", ")} season(s)` : "full history"} automatically.
         </p>
