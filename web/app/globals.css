@@ -37,6 +37,15 @@ nav.topnav {
   gap: 24px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
+  /* Pinned so navigation (and the league/season switchers that live in
+     each page's controls row, once scrolled past) stays reachable without
+     scrolling back up -- opaque background since content now scrolls
+     underneath it, and a z-index above the tables' own sticky columns
+     (z-index: 2) so it stays on top of everything, not just table cells. */
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--bg);
 }
 
 .topnav-bar {
