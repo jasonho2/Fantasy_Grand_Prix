@@ -13,6 +13,8 @@ import {
 } from "recharts";
 import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
+import TeamLogo from "../components/TeamLogo";
+import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/ChartTeamLogoDot";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
 
@@ -291,7 +293,7 @@ function RankDelta({ delta }) {
   );
 }
 
-function ContestPanel({ contest, league, season }) {
+function ContestPanel({ contest, league, season, logos }) {
   // Which ranking to show: Solo (each team ranked individually every week)
   // or Double Dash (that week's real head-to-head matchup pairs combine
   // scores and get ranked as a pair -- see the contests API route for the
@@ -522,7 +524,11 @@ function ContestPanel({ contest, league, season }) {
                 <tr key={row.team} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
                   <td>{row.displayRank}</td>
                   <td className="sticky-col">
-                    <span className="wrap-cell" style={{ display: "inline-block", verticalAlign: "middle" }}>
+                    <span
+                      className="wrap-cell"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, verticalAlign: "middle" }}
+                    >
+                      <TeamLogo src={logos?.[row.team]} />
                       {row.team}
                     </span>
                     <RankDelta delta={row.rankDelta} />
@@ -556,7 +562,10 @@ function ContestPanel({ contest, league, season }) {
               padding, all of it. */}
           <div onClick={() => setSelectedTeam(null)}>
             <ResponsiveContainer width="100%" height={Math.max(320, effectiveLeaderboard.length * 24 + 200)}>
-              <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+              {/* Extra right margin makes room for each line's end-of-line
+                  team logo (see ChartTeamLogoDot), drawn just past the last
+                  plotted point rather than on top of it. */}
+              <LineChart data={chartData} margin={{ top: 10, right: 44, bottom: 10, left: 0 }}>
                 <CartesianGrid stroke="#2a2e37" />
                 <XAxis
                   dataKey="week"
@@ -573,19 +582,33 @@ function ContestPanel({ contest, league, season }) {
                   onClick={(entry, index, event) => selectTeam(entry.value, event)}
                   wrapperStyle={{ cursor: "pointer", paddingTop: 16 }}
                 />
-                {visibleRows.map((row) => (
-                  <Line
-                    key={row.team}
-                    type="linear"
-                    dataKey={row.team}
-                    stroke={COLORS[sortedTeams.indexOf(row.team) % COLORS.length]}
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls={false}
-                    onClick={(_, __, event) => selectTeam(row.team, event)}
-                    style={{ cursor: "pointer" }}
-                  />
-                ))}
+                {visibleRows.map((row) => {
+                  const lastIdx = lastValidRowIndex(chartData, row.team);
+                  const clipId = `logo-clip-${slugForId(contest.name)}-${slugForId(row.team)}`;
+                  return (
+                    <Line
+                      key={row.team}
+                      type="linear"
+                      dataKey={row.team}
+                      stroke={COLORS[sortedTeams.indexOf(row.team) % COLORS.length]}
+                      strokeWidth={2}
+                      dot={(dotProps) =>
+                        dotProps.index === lastIdx ? (
+                          <ChartTeamLogoDot
+                            key={clipId}
+                            cx={dotProps.cx}
+                            cy={dotProps.cy}
+                            src={logos?.[row.team]}
+                            clipId={clipId}
+                          />
+                        ) : null
+                      }
+                      connectNulls={false}
+                      onClick={(_, __, event) => selectTeam(row.team, event)}
+                      style={{ cursor: "pointer" }}
+                    />
+                  );
+                })}
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -610,6 +633,13 @@ function ContestsInner() {
       ? `/api/contests?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}`
       : null
   );
+
+  const { data: logoData } = useJson(
+    activeSeason && activeLeague
+      ? `/api/team-logos?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}`
+      : null
+  );
+  const logos = logoData?.logos;
 
   // Cups come back in chronological order (Mushroom -> Flower -> Star ->
   // Special), which is right for the weeks *within* a cup but backwards for
@@ -661,7 +691,13 @@ function ContestsInner() {
       )}
 
       {startedContests.map((contest) => (
-        <ContestPanel key={contest.name} contest={contest} league={activeLeague} season={activeSeason} />
+        <ContestPanel
+          key={contest.name}
+          contest={contest}
+          league={activeLeague}
+          season={activeSeason}
+          logos={logos}
+        />
       ))}
     </>
   );

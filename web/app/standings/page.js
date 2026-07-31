@@ -14,6 +14,8 @@ import {
 } from "recharts";
 import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
+import TeamLogo from "../components/TeamLogo";
+import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/ChartTeamLogoDot";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
 
@@ -128,6 +130,8 @@ function TrendChart({
   onSelectTeam,
   yAxisLabel,
   defaultViewMode = "weekly",
+  logos,
+  chartId,
 }) {
   const [viewMode, setViewMode] = useState(defaultViewMode); // "weekly" | "cumulative"
 
@@ -187,7 +191,10 @@ function TrendChart({
       </div>
       {rows.length > 0 ? (
         <ResponsiveContainer width="100%" height={420}>
-          <LineChart data={rows} margin={{ bottom: 12 }}>
+          {/* Extra right margin makes room for each line's end-of-line team
+              logo, which is drawn just past the last plotted point (see
+              ChartTeamLogoDot) rather than on top of it. */}
+          <LineChart data={rows} margin={{ bottom: 12, right: 28 }}>
             <CartesianGrid stroke="#2a2e37" />
             <XAxis
               dataKey="week"
@@ -217,18 +224,32 @@ function TrendChart({
               onClick={(e) => onSelectTeam(e.value)}
               wrapperStyle={{ cursor: "pointer", paddingTop: 20 }}
             />
-            {visibleTeams.map((team) => (
-              <Line
-                key={team}
-                type="monotone"
-                dataKey={team}
-                stroke={COLORS[teams.indexOf(team) % COLORS.length]}
-                dot={false}
-                strokeWidth={2}
-                onClick={() => onSelectTeam(team)}
-                style={{ cursor: "pointer" }}
-              />
-            ))}
+            {visibleTeams.map((team) => {
+              const lastIdx = lastValidRowIndex(rows, team);
+              const clipId = `logo-clip-${slugForId(chartId)}-${slugForId(team)}`;
+              return (
+                <Line
+                  key={team}
+                  type="monotone"
+                  dataKey={team}
+                  stroke={COLORS[teams.indexOf(team) % COLORS.length]}
+                  dot={(dotProps) =>
+                    dotProps.index === lastIdx ? (
+                      <ChartTeamLogoDot
+                        key={clipId}
+                        cx={dotProps.cx}
+                        cy={dotProps.cy}
+                        src={logos?.[team]}
+                        clipId={clipId}
+                      />
+                    ) : null
+                  }
+                  strokeWidth={2}
+                  onClick={() => onSelectTeam(team)}
+                  style={{ cursor: "pointer" }}
+                />
+              );
+            })}
           </LineChart>
         </ResponsiveContainer>
       ) : (
@@ -252,6 +273,17 @@ function StandingsInner() {
       ? `/api/standings?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}`
       : null
   );
+
+  // Team name -> profile picture URL, for the Leaderboard table and the
+  // end-of-line marker on both trend charts. Fetched once per league/season
+  // rather than joined server-side, since every route here already keys its
+  // rows by team name (see api/team-logos/route.js).
+  const { data: logoData } = useJson(
+    activeSeason && activeLeague
+      ? `/api/team-logos?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}`
+      : null
+  );
+  const logos = logoData?.logos;
 
   // null = default sort (best win-loss record, points_for as tiebreaker).
   // Clicking a column header switches to sorting by that column alone.
@@ -413,7 +445,10 @@ function StandingsInner() {
                         className="sticky-col"
                         style={{ background: selectedTeam === row.team ? "#1f2a3c" : undefined }}
                       >
-                        {row.team}
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <TeamLogo src={logos?.[row.team]} />
+                          {row.team}
+                        </span>
                       </td>
                       <td>{row.wins}</td>
                       <td>{row.losses}</td>
@@ -498,6 +533,8 @@ function StandingsInner() {
             selectedTeam={selectedTeam}
             onSelectTeam={selectTeam}
             yAxisLabel="Fantasy Points"
+            logos={logos}
+            chartId="weekly"
           />
 
           <TrendChart
@@ -510,6 +547,8 @@ function StandingsInner() {
             onSelectTeam={selectTeam}
             yAxisLabel="Grand Prix Points"
             defaultViewMode="cumulative"
+            logos={logos}
+            chartId="grandprix"
           />
         </>
       )}

@@ -3,6 +3,7 @@
 import { Suspense, useMemo, useState } from "react";
 import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
+import TeamLogo from "../components/TeamLogo";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
 
@@ -101,6 +102,13 @@ function MatchupsInner() {
   );
   const rows = data?.rows || [];
 
+  const { data: logoData } = useJson(
+    activeSeason && activeLeague
+      ? `/api/team-logos?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}`
+      : null
+  );
+  const logos = logoData?.logos;
+
   const [teamFilter, setTeamFilter] = useState("All");
 
   const teams = useMemo(() => {
@@ -172,7 +180,10 @@ function MatchupsInner() {
                         return (
                           <tr key={i}>
                             <td style={cellStyle(homeWon)}>
-                              {row.home_team}
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                <TeamLogo src={logos?.[row.home_team]} />
+                                {row.home_team}
+                              </span>
                               {homeRec && <span style={recordStyle}> ({homeRec})</span>}
                             </td>
                             <td
@@ -196,7 +207,10 @@ function MatchupsInner() {
                               {row.is_bye ? (
                                 <span className="badge bye">BYE</span>
                               ) : (
-                                row.away_team
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                  <TeamLogo src={logos?.[row.away_team]} />
+                                  {row.away_team}
+                                </span>
                               )}
                               {awayRec && <span style={recordStyle}> ({awayRec})</span>}
                             </td>
@@ -225,8 +239,18 @@ function MatchupsInner() {
                 <tbody>
                   {h2h.map((row) => (
                     <tr key={`${row.a}-${row.b}`}>
-                      <td>{row.a}</td>
-                      <td>{row.b}</td>
+                      <td>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <TeamLogo src={logos?.[row.a]} />
+                          {row.a}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <TeamLogo src={logos?.[row.b]} />
+                          {row.b}
+                        </span>
+                      </td>
                       <td>
                         {row.aWins}-{row.bWins}
                         {row.ties > 0 ? `-${row.ties}` : ""}

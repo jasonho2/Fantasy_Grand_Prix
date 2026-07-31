@@ -152,7 +152,18 @@ def extract_player_rows(week_raw, year, week, team_manager, team_name):
 
 
 def build_manager_map(raw):
-    """Map team_id -> manager display name, and team_id -> team name."""
+    """Map team_id -> manager display name, team_id -> team name, and
+    team_id -> logo URL.
+
+    The logo comes straight from ESPN's mTeam view (t["logo"]) -- a CDN URL
+    to either the manager's uploaded team image or ESPN's default avatar.
+    ESPN always sends *something* here (falls back to a generic default
+    avatar image if the manager never set a custom one), so this is treated
+    as present-or-absent per team rather than validated further; the
+    frontend still needs its own fallback for teams pulled before this
+    field existed (logo_url NULL in the DB) or any future response shape
+    that omits it.
+    """
     members = {m["id"]: m for m in raw.get("members", [])}
 
     def member_name(guid):
@@ -167,6 +178,7 @@ def build_manager_map(raw):
 
     team_manager = {}
     team_name = {}
+    team_logo = {}
     for t in raw.get("teams", []):
         tid = t["id"]
         owner_guids = t.get("owners") or ([t["primaryOwner"]] if t.get("primaryOwner") else [])
@@ -174,8 +186,9 @@ def build_manager_map(raw):
         team_manager[tid] = " / ".join(managers)
         name = t.get("name") or f"{t.get('location', '')} {t.get('nickname', '')}".strip()
         team_name[tid] = name or f"Team {tid}"
+        team_logo[tid] = t.get("logo")
 
-    return team_manager, team_name
+    return team_manager, team_name, team_logo
 
 
 def build_matchup_records(raw, year, team_manager):
@@ -287,7 +300,7 @@ def pull_season(conn, league_config, year, external_season_id):
 
     raw = fetch_league_json(external_season_id, year, espn_s2, swid)
     league_name = raw.get("settings", {}).get("name")
-    team_manager, team_name = build_manager_map(raw)
+    team_manager, team_name, team_logo = build_manager_map(raw)
     matchup_records, played_weeks, live_week, live_pairings = build_matchup_records(raw, year, team_manager)
     player_rows = build_player_points_rows(
         external_season_id, year, played_weeks, team_manager, team_name, espn_s2, swid
@@ -340,6 +353,7 @@ def pull_season(conn, league_config, year, external_season_id):
         "league_name": league_name,
         "team_manager": team_manager,
         "team_name": team_name,
+        "team_logo": team_logo,
         "player_rows": player_rows,
         "matchup_records": matchup_records,
         "live_week": live_week,

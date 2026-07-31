@@ -326,6 +326,12 @@ def _migrate_legacy_single_league_schema(conn):
 COLUMN_MIGRATIONS = [
     ("leagues", "pull_years", "TEXT"),
     ("leagues", "last_pulled_at", "TEXT"),
+    # URL of the team's profile picture/logo, as reported by the platform
+    # (ESPN's mTeam view; Sleeper has no per-team logo concept today, so
+    # this stays NULL for Sleeper-sourced teams). Populated in
+    # get_or_create_team(); NULL until the next pipeline run touches a
+    # league sourced before this column existed.
+    ("teams", "logo_url", "TEXT"),
 ]
 
 
@@ -521,7 +527,7 @@ def get_or_create_manager(conn, league_id, name):
     return row[0]
 
 
-def get_or_create_team(conn, league_id, season, platform_team_id, team_name, manager_id):
+def get_or_create_team(conn, league_id, season, platform_team_id, team_name, manager_id, logo_url=None):
     platform_team_id = str(platform_team_id)
     row = conn.execute(
         "SELECT team_id FROM teams WHERE league_id = ? AND season = ? AND platform_team_id = ?",
@@ -529,14 +535,14 @@ def get_or_create_team(conn, league_id, season, platform_team_id, team_name, man
     ).fetchone()
     if row:
         conn.execute(
-            "UPDATE teams SET team_name = ?, manager_id = ? WHERE team_id = ?",
-            (team_name, manager_id, row[0]),
+            "UPDATE teams SET team_name = ?, manager_id = ?, logo_url = ? WHERE team_id = ?",
+            (team_name, manager_id, logo_url, row[0]),
         )
         return row[0]
     row = conn.execute(
-        """INSERT INTO teams (league_id, season, platform_team_id, team_name, manager_id)
-           VALUES (?, ?, ?, ?, ?) RETURNING team_id""",
-        (league_id, season, platform_team_id, team_name, manager_id),
+        """INSERT INTO teams (league_id, season, platform_team_id, team_name, manager_id, logo_url)
+           VALUES (?, ?, ?, ?, ?, ?) RETURNING team_id""",
+        (league_id, season, platform_team_id, team_name, manager_id, logo_url),
     ).fetchone()
     return row[0]
 
@@ -576,13 +582,26 @@ def get_or_create_player(conn, platform, platform_player_id, name, position):
 
 
 def load_season(
-    conn, league_id, platform, year, team_manager, team_name, player_rows, matchup_records, live_matchup_records=None
+    conn,
+    league_id,
+    platform,
+    year,
+    team_manager,
+    team_name,
+    player_rows,
+    matchup_records,
+    live_matchup_records=None,
+    team_logo=None,
 ):
     """
     league_id: internal leagues.league_id (see get_or_create_league)
     platform: 'espn' | 'sleeper' -- used to scope player dedup
     team_manager: {platform_team_id: manager_name}
     team_name: {platform_team_id: team_name}
+    team_logo: {platform_team_id: logo_url}, optional -- ESPN's mTeam view
+               reports one per team; Sleeper has none, so callers that don't
+               have this concept can omit it (or pass {}) and every team's
+               logo_url stays NULL, same as before this column existed.
     player_rows: list of dicts (must include platform_team_id and platform_player_id)
     matchup_records: list of dicts with home_platform_team_id/away_platform_team_id
                       (raw platform team ids, not names)
@@ -597,11 +616,18 @@ def load_season(
                       live in a previous run and has since been decided
                       doesn't leave a stale row behind.
     """
+    team_logo = team_logo or {}
     team_id_map = {}  # platform_team_id (as given) -> internal teams.team_id
     for platform_team_id, manager_name in team_manager.items():
         manager_id = get_or_create_manager(conn, league_id, manager_name)
         team_id_map[platform_team_id] = get_or_create_team(
-            conn, league_id, year, platform_team_id, team_name.get(platform_team_id), manager_id
+            conn,
+            league_id,
+            year,
+            platform_team_id,
+            team_name.get(platform_team_id),
+            manager_id,
+            logo_url=team_logo.get(platform_team_id),
         )
 
     for row in player_rows:
