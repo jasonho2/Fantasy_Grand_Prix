@@ -107,19 +107,21 @@ export default function AboutPage() {
             leagues.
           </p>
           <p style={bodyStyle}>Anyone can add a Sleeper league with the Sleeper League ID.</p>
-
-          <h3 style={subheadStyle}>Credits</h3>
-          <p style={bodyStyle}>
-            Shout out to my brother for the idea. He has hosted this for his league for a couple
-            seasons before my friend league adopted the idea. He has more customizations and fun,
-            creative manual additions that have not yet been built in to this platform.
-          </p>
-          <p style={bodyStyle}>
-            This project has been limited to the current scope of my own league&apos;s rules and
-            interests.
-          </p>
-          <p style={bodyStyle}>Claude is the MVP for doing most of the heavy lifting and development.</p>
         </div>
+      </div>
+
+      <div className="panel">
+        <h2>Credits</h2>
+        <p style={bodyStyle}>
+          Shout out to my brother for the idea. He has hosted this for his league for a couple
+          seasons before my friend league adopted the idea. He has more customizations and fun,
+          creative manual additions that have not yet been built in to this platform.
+        </p>
+        <p style={bodyStyle}>
+          This project has been limited to the current scope of my own league&apos;s rules and
+          interests.
+        </p>
+        <p style={bodyStyle}>Claude is the MVP for doing most of the heavy lifting and development.</p>
       </div>
     </>
   );
