@@ -32,10 +32,12 @@ export default function AboutPage() {
 
         <h3 style={firstSubheadStyle}>Modes and Scoring Format</h3>
         <p style={bodyStyle}>
-          In fantasy football terms, the team with the highest scoring starting lineup earns the
-          most points, followed by second place, third place, and so on. The default scoring
-          format is for 12 teams to play as solo participants, where first place to last place
-          earns points in this order: 12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0.
+          In fantasy football terms, each week the team with the highest scoring starting lineup
+          earns the most points, followed by second place, third place, and so on. The default
+          scoring format is for 12 teams to play as solo participants, where first place to last
+          place earns points in this order: 12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0. Weeks are
+          independent of each other and the scoring repeats again the following week. Even with
+          one bad week, any team can still come out victorious over the stretch of 3-4 weeks.
         </p>
         <p style={bodyStyle}>
           Double Dash is a fun, cooperative mode where everyone participates in pairs -- each
