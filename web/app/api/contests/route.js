@@ -1,9 +1,13 @@
 import { query } from "@/lib/db";
 
 // Point-total side-contests within one league's season (e.g. weeks 1-4,
-// 5-8, 9-12, 13-17). Windows are configured per league in config.json and
-// loaded into the contest_windows table by the pipeline -- not hardcoded
-// here, since they can vary by league/season/commissioner.
+// 5-8, 9-12, 13-16). Cup names/count/order are configured per league in
+// config.json and loaded into the contest_windows table by the pipeline --
+// not hardcoded here, since they can vary by league/season/commissioner.
+// Each cup's actual week boundaries, however, come from CUP_WEEK_SETS
+// below (positionally overriding whatever's in contest_windows) so a
+// viewer can toggle between the 15-week and 16-week structures live via
+// ?cupWeeks=15|16, independent of season -- see that constant's comment.
 //
 // Two scoring modes, both Mario-Kart-style weekly placement points that
 // accumulate cumulatively across a contest window's weeks (each week's
@@ -60,6 +64,34 @@ function placementPointsDoubleDash(rank) {
   return rank - 1 < DOUBLE_DASH_POINT_TABLE.length ? DOUBLE_DASH_POINT_TABLE[rank - 1] : 0;
 }
 
+// The two supported Grand Prix cup lengths, viewable via ?cupWeeks=15|16 --
+// independent of season (see below), since the cup leaderboard is already
+// computed live from raw weekly scores per-request (nothing about a cup's
+// standings is precomputed or cached beyond its week boundaries), so
+// switching structures needs no pipeline re-run or database change.
+//
+// "15" is the original 3/4/4/4-week split (Mushroom 1-3, Flower 4-7, Star
+// 8-11, Special 12-15). "16" is the league's new policy, a uniform
+// 4/4/4/4-week split (Mushroom 1-4, Flower 5-8, Star 9-12, Special 13-16)
+// -- the new default. Applied positionally (1st configured cup gets the
+// 1st entry here, etc.) on top of whatever cups/names are configured in
+// contest_windows, so a league with a different cup count just keeps its
+// configured boundaries for any cups beyond these four.
+const CUP_WEEK_SETS = {
+  15: [
+    { start_week: 1, end_week: 3 },
+    { start_week: 4, end_week: 7 },
+    { start_week: 8, end_week: 11 },
+    { start_week: 12, end_week: 15 },
+  ],
+  16: [
+    { start_week: 1, end_week: 4 },
+    { start_week: 5, end_week: 8 },
+    { start_week: 9, end_week: 12 },
+    { start_week: 13, end_week: 16 },
+  ],
+};
+
 export async function GET(request) {
   const params = new URL(request.url).searchParams;
   const season = Number(params.get("season"));
@@ -67,6 +99,7 @@ export async function GET(request) {
   if (!season || !league) {
     return Response.json({ error: "season and league query params are required" }, { status: 400 });
   }
+  const cupWeeks = params.get("cupWeeks") === "15" ? 15 : 16; // anything other than "15" defaults to the new 16-week policy
 
   const nameRows = await query(
     `SELECT COALESCE(l.display_name, ls.league_name) AS name
@@ -76,13 +109,21 @@ export async function GET(request) {
   ).catch(() => []);
   const leagueName = nameRows[0]?.name ?? null;
 
-  const windows = await query(
+  const configuredWindows = await query(
     `SELECT cw.id AS contest_id, cw.contest_name AS name, cw.start_week, cw.end_week, cw.sort_order
      FROM contest_windows cw
      WHERE cw.season = ? AND cw.league_id = (SELECT league_id FROM leagues WHERE slug = ?)
      ORDER BY cw.sort_order`,
     [season, league]
   );
+  // Cup names/count/order still come from the database; only the week
+  // boundaries get substituted, positionally, from whichever structure was
+  // requested (see CUP_WEEK_SETS above).
+  const weekOverrides = CUP_WEEK_SETS[cupWeeks];
+  const windows = configuredWindows.map((w, i) => {
+    const override = weekOverrides[i];
+    return override ? { ...w, start_week: override.start_week, end_week: override.end_week } : w;
+  });
 
   const weeklyRows = await query(
     `SELECT wmp.week, m.manager_name AS manager, t.team_name AS team, wmp.points
@@ -371,5 +412,5 @@ export async function GET(request) {
     };
   });
 
-  return Response.json({ season, maxWeek, maxDecidedWeek, liveWeek, leagueName, contests });
+  return Response.json({ season, cupWeeks, maxWeek, maxDecidedWeek, liveWeek, leagueName, contests });
 }

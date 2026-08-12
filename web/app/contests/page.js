@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
+import CupWeeksSelect from "../components/CupWeeksSelect";
 import TeamLogo from "../components/TeamLogo";
 import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/ChartTeamLogoDot";
 import { useJson } from "../../lib/useJson";
@@ -622,6 +623,14 @@ function ContestPanel({ contest, league, season, logos }) {
 function ContestsInner() {
   const [league, setLeague] = useUrlState("league");
   const [season, setSeason] = useUrlState("season");
+  // 15-week (legacy) vs 16-week (current league policy) cup structure --
+  // independent of season, and persisted the same way league/season are:
+  // a URL param carried across page navigation by Nav.js, so it survives
+  // both a refresh and clicking away to another page and back. Absent from
+  // the URL until explicitly changed; defaults to "16" (see
+  // api/contests/route.js's CUP_WEEK_SETS) both here and server-side.
+  const [cupWeeksParam, setCupWeeks] = useUrlState("cupWeeks");
+  const activeCupWeeks = cupWeeksParam === "15" ? "15" : "16";
 
   const { data: meta } = useJson(`/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`);
   const seasons = meta?.seasons || [];
@@ -630,7 +639,7 @@ function ContestsInner() {
 
   const { data, loading, error } = useJson(
     activeSeason && activeLeague
-      ? `/api/contests?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}`
+      ? `/api/contests?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}&cupWeeks=${activeCupWeeks}`
       : null
   );
 
@@ -664,6 +673,7 @@ function ContestsInner() {
           onChange={(next) => setLeague(next, { clear: ["season"] })}
         />
         <SeasonSelect seasons={seasons} season={activeSeason} onChange={setSeason} />
+        <CupWeeksSelect value={activeCupWeeks} onChange={setCupWeeks} />
       </div>
 
       <h1 style={{ fontSize: 20, margin: "0 0 20px" }}>
