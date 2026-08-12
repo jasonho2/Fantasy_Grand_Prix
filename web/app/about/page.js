@@ -52,16 +52,21 @@ export default function AboutPage() {
 
         <h3 style={subheadStyle}>Disclaimer on Number of Weeks</h3>
         <p style={bodyStyle}>
-          Out of respect and nature of competition, by default there are only 15 weeks of scoring
-          rather than a perfect 16 weeks (4 weeks x 4 cups). Weeks 1-14 are regular season and
-          week 15 is the first week of playoffs -- every team should participate for at least 15
-          weeks.
+          By default, there are 16 weeks of Mario Kart cups (4 weeks x 4 cups). However, for the
+          winners and consolidation brackets, this will include weeks during fantasy playoffs
+          where teams may be out of contention for first (and last) place.
+        </p>
+        <p style={bodyStyle}>
+          Out of respect and nature of competition, there is an option for only 15 weeks of
+          scoring rather than a perfect 16 weeks (4 weeks x 4 cups). Weeks 1-14 are regular season
+          and week 15 is the first week of playoffs -- every team should participate for at least
+          15 weeks.
         </p>
         <p style={bodyStyle}>
           Due to teams being eliminated from actual fantasy contention in winners and/or losers
-          brackets, rosters should lock and teams should not be able to make any more add/drop
-          transactions for the rest of the season once their teams have been eliminated from
-          league rewards (or punishments).
+          brackets, in this case rosters should lock and teams should not be able to make any more
+          add/drop transactions for the rest of the season once their teams have been eliminated
+          from league rewards (or punishments).
         </p>
         <p style={bodyStyle}>Thus, the Grand Prix is organized as follows by default:</p>
         <ul style={{ ...bodyStyle, margin: "0 0 4px", paddingLeft: 20 }}>
