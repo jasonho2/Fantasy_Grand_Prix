@@ -53,7 +53,7 @@ export default function AboutPage() {
         <h3 style={subheadStyle}>Disclaimer on Number of Weeks</h3>
         <p style={bodyStyle}>
           By default, there are 16 weeks of Mario Kart cups (4 weeks x 4 cups). However, for the
-          winners and consolidation brackets, this will include weeks during fantasy playoffs
+          winners and consolidation brackets, this will include weeks of during fantasy playoffs
           where teams may be out of contention for first (and last) place.
         </p>
         <p style={bodyStyle}>
@@ -68,7 +68,7 @@ export default function AboutPage() {
           add/drop transactions for the rest of the season once their teams have been eliminated
           from league rewards (or punishments).
         </p>
-        <p style={bodyStyle}>Thus, the Grand Prix is organized as follows by default:</p>
+        <p style={bodyStyle}>Thus, the Grand Prix is organized as follows for the 15-week version:</p>
         <ul style={{ ...bodyStyle, margin: "0 0 4px", paddingLeft: 20 }}>
           <li>Mushroom Cup: Weeks 1-3</li>
           <li>Flower Cup: Weeks 4-7</li>
