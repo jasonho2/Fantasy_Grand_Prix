@@ -637,10 +637,22 @@ def load_season(
         team_id = team_id_map.get(row["platform_team_id"])
         if team_id is None:
             continue
+        # The WHERE guard on the DO UPDATE makes this a true no-op (no row
+        # actually rewritten) when a player's score hasn't changed since the
+        # last pull -- every pipeline run recomputes every decided week's
+        # player stats from scratch (see build_player_points_rows), so
+        # without this guard every single row would get rewritten on every
+        # run regardless of whether anything actually changed. `IS NOT`
+        # (not `!=`) is required here so this behaves correctly even when
+        # points is NULL on either side -- `!=` against a NULL is neither
+        # true nor false in SQL, which would silently skip the update
+        # forever once a row went NULL, or never stop rewriting a row that
+        # was always NULL.
         conn.execute(
             """INSERT INTO weekly_player_points (season, week, team_id, player_id, points)
                VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(season, week, team_id, player_id) DO UPDATE SET points = excluded.points""",
+               ON CONFLICT(season, week, team_id, player_id) DO UPDATE SET points = excluded.points
+               WHERE weekly_player_points.points IS NOT excluded.points""",
             (row["season"], row["week"], team_id, player_id, row["points"]),
         )
 
