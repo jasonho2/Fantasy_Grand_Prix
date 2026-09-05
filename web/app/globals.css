@@ -538,6 +538,17 @@ th, td {
   border-bottom: 1px solid var(--border);
 }
 
+/* Grand Prix cup tables (every cup panel on the Contests page shares this
+   one class): Rank and Team stay left-aligned, but every score column --
+   each week's placement points and the Total/PF columns -- reads as a
+   right-aligned number, the normal convention for tabular figures. Applies
+   at every screen size, on top of (not instead of) the narrower-screen
+   padding/sticky-column rules for this same class below. */
+.contests-table th:not(:nth-child(1)):not(:nth-child(2)),
+.contests-table td:not(:nth-child(1)):not(:nth-child(2)) {
+  text-align: right;
+}
+
 th {
   color: var(--text-dim);
   font-weight: 600;
