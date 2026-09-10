@@ -13,6 +13,17 @@ export async function GET(request) {
     "SELECT slug, display_name AS displayName, platform FROM leagues ORDER BY slug"
   ).catch(() => []); // tolerate a not-yet-migrated DB that lacks the leagues table
 
+  // Whether the manual-refresh button (Nav.js's RefreshButton, see
+  // api/refresh/route.js) has everything it needs to actually work --
+  // computed here rather than in the button itself since only the server
+  // can see these env vars. All three have to be set or the button stays
+  // hidden entirely rather than rendering something that always 501s.
+  const refreshEnabled = !!(
+    process.env.REFRESH_PASSPHRASE &&
+    process.env.GITHUB_DISPATCH_TOKEN &&
+    process.env.GITHUB_REPO
+  );
+
   if (leagues.length === 0) {
     return Response.json({
       leagues: [],
@@ -21,6 +32,7 @@ export async function GET(request) {
       managers: [],
       leagueName: null,
       lastPulledAt: null,
+      refreshEnabled,
     });
   }
 
@@ -63,5 +75,6 @@ export async function GET(request) {
     managers: managers.map((r) => r.manager_name),
     leagueName: nameRows[0]?.name ?? null,
     lastPulledAt: pulledAtRows[0]?.last_pulled_at ?? null,
+    refreshEnabled,
   });
 }

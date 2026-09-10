@@ -167,6 +167,42 @@ edit the `cron:` line in the workflow file to change that. You can also
 trigger a pull on demand any time from the repo's **Actions** tab ->
 "Pull fantasy data" -> **Run workflow**, no terminal needed.
 
+### Manual refresh from the site itself
+
+The GitHub Actions tab's "Run workflow" button above requires repo access,
+which not everyone helping run the league has. For a lighter-weight
+option, Nav shows a **Refresh Now** button next to "Data as of" -- on
+every page, not just Contests -- that triggers the exact same workflow via
+GitHub's API, gated behind its own passphrase so a public site doesn't let
+anyone kick off runs at will. Useful for anything outside the Thu/Sun/Mon
+cron, like a rescheduled Wednesday game.
+
+It's hidden entirely unless three more environment variables are set on
+the frontend deployment (Vercel), in addition to the ones from "4. Deploy
+the frontend":
+
+| Variable | Value |
+| --- | --- |
+| `REFRESH_PASSPHRASE` | a passphrase of your choosing -- can be the same as `ADD_LEAGUE_PASSPHRASE` or different, your call |
+| `GITHUB_DISPATCH_TOKEN` | a GitHub token with permission to dispatch this repo's workflows (see below) |
+| `GITHUB_REPO` | `your-username/your-repo-name` |
+
+`GITHUB_DISPATCH_TOKEN` needs to be able to trigger `workflow_dispatch` on
+this repo -- the least-privilege way to get that is a **fine-grained**
+personal access token (GitHub Settings -> Developer settings -> Personal
+access tokens -> Fine-grained tokens -> Generate new token), scoped to
+just this one repository, with the **Actions** repository permission set
+to **Read and write**. A classic token with the `repo` scope also works,
+but grants far more than this needs. Keep it out of `config.example.json`/
+the repo entirely -- it only ever lives in Vercel's environment variables.
+
+The button has a short cooldown after a successful trigger (see
+`REFRESH_COOLDOWN_SECONDS` in `web/lib/refreshConfig.js`, 3 minutes by
+default), since a run that just started wouldn't have anything new to
+fetch yet -- both the button itself (proactively, so it won't even let you
+try) and the API route (the real enforcement) check this off the same
+`last_pulled_at` timestamp the "Data as of" text already shows.
+
 The Season Leaderboard (win-loss records) and final matchup results only
 update once ESPN marks a week fully decided -- in practice, Tuesday
 morning after Monday Night Football; a matchup's winner genuinely can't be

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
+import RefreshButton from "./RefreshButton";
 
 const BASE_LINKS = [
   { href: "/standings", label: "Season Leaderboard" },
@@ -47,7 +48,9 @@ function NavInner() {
   const [season] = useUrlState("season");
   const [cupWeeks] = useUrlState("cupWeeks");
 
-  const { data: meta } = useJson(`/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`);
+  const { data: meta, refetch: refetchMeta } = useJson(
+    `/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`
+  );
   const grandPrixLabel = meta?.leagueName ? `${meta.leagueName} Grand Prix` : "Contests";
   const dataAsOf = formatDataAsOf(meta?.lastPulledAt);
 
@@ -99,6 +102,9 @@ function NavInner() {
           >
             Data as of {dataAsOf}
           </span>
+        )}
+        {meta?.refreshEnabled && (
+          <RefreshButton league={meta?.league} lastPulledAt={meta?.lastPulledAt} onRefreshed={refetchMeta} />
         )}
       </div>
       <div className="nav-links">
