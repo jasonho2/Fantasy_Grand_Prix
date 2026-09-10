@@ -10,6 +10,28 @@ import { query } from "@/lib/db";
 // the existing SQL untouched.
 //
 // GET /api/team-logos?league=<slug>&season=2025
+
+// ESPN's newer custom-logo-upload domain 401s on a bare hotlinked <img src>
+// without the league's espn_s2/SWID session cookies -- unlike the older
+// g.espncdn.com CDN, which serves publicly. Any logo_url on this host gets
+// rewritten to route through api/team-logo-proxy/route.js instead, which
+// fetches it server-side with those cookies attached and streams the bytes
+// back same-origin. Everything else (g.espncdn.com defaults/logo-packs,
+// third-party hosts like postimg/Discord) already loads fine as-is.
+const PROXY_HOST = "mystique-api.fantasy.espn.com";
+
+function toDisplayUrl(logoUrl, league) {
+  try {
+    if (new URL(logoUrl).hostname === PROXY_HOST) {
+      return `/api/team-logo-proxy?league=${encodeURIComponent(league)}&url=${encodeURIComponent(logoUrl)}`;
+    }
+  } catch {
+    // Not a valid absolute URL -- fall through and use it as-is (frontend's
+    // TeamLogo.js already tolerates a bad src via its onError fallback).
+  }
+  return logoUrl;
+}
+
 export async function GET(request) {
   const params = new URL(request.url).searchParams;
   const league = params.get("league");
@@ -28,7 +50,7 @@ export async function GET(request) {
 
   const logos = {};
   for (const row of rows) {
-    if (row.logoUrl) logos[row.team] = row.logoUrl;
+    if (row.logoUrl) logos[row.team] = toDisplayUrl(row.logoUrl, league);
   }
   return Response.json({ logos });
 }
