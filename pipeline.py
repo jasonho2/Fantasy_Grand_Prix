@@ -50,6 +50,7 @@ Usage
 -----
     python pipeline.py --config config.json
     python pipeline.py --config config.json --sqlite my_local.db
+    python pipeline.py --config config.json --current-season-only
 """
 
 import argparse
@@ -75,11 +76,20 @@ def load_config(path):
         return json.load(f)
 
 
-def _pull_one_league(conn, league_cfg):
+def _pull_one_league(conn, league_cfg, current_season_only=False):
     """Register/update one league and pull+load every year it resolves to.
     Returns nothing -- all state changes land directly in the database.
     Catches its own per-season errors so one bad season doesn't stop the
-    rest of this league's years, or any other league, from loading."""
+    rest of this league's years, or any other league, from loading.
+
+    current_season_only: pull just this league's single most recent
+        configured/discovered year instead of every year. Every full
+        season pulled means a full round of per-week ESPN boxscore
+        requests (see platforms/espn.py's build_player_points_rows) even
+        though a season from a year or two ago is long since finished and
+        will never change again -- re-fetching those every single run
+        added up to real minutes of wasted API calls each time. See
+        pull-data.yml's FULL_PULL step comment for which runs set this."""
     slug = league_cfg.get("slug")
     platform = league_cfg.get("platform")
     module = PLATFORM_MODULES.get(platform)
@@ -123,6 +133,8 @@ def _pull_one_league(conn, league_cfg):
         return
 
     pull_years = years or sorted(season_ids.keys())
+    if current_season_only and pull_years:
+        pull_years = [max(pull_years)]
     for year in pull_years:
         external_season_id = season_ids.get(year)
         if external_season_id is None:
@@ -172,7 +184,7 @@ def _pull_one_league(conn, league_cfg):
             continue
 
 
-def run_pipeline(leagues_config, sqlite_path):
+def run_pipeline(leagues_config, sqlite_path, current_season_only=False):
     if not sqlite_path:
         raise ValueError("sqlite_path is required (ignored in favor of Turso if TURSO_DATABASE_URL is set).")
 
@@ -180,7 +192,7 @@ def run_pipeline(leagues_config, sqlite_path):
 
     processed_slugs = set()
     for league_cfg in leagues_config:
-        _pull_one_league(conn, league_cfg)
+        _pull_one_league(conn, league_cfg, current_season_only=current_season_only)
         if league_cfg.get("slug"):
             processed_slugs.add(league_cfg["slug"])
 
@@ -227,7 +239,7 @@ def run_pipeline(leagues_config, sqlite_path):
             }
         else:
             continue
-        _pull_one_league(conn, league_cfg)
+        _pull_one_league(conn, league_cfg, current_season_only=current_season_only)
 
     conn.close()
 
@@ -236,13 +248,23 @@ def main():
     parser = argparse.ArgumentParser(description="Pull fantasy football data (ESPN + Sleeper) into the database.")
     parser.add_argument("--config", default="config.json", help="Path to config JSON file")
     parser.add_argument("--sqlite", help="Local SQLite .db path (ignored if TURSO_DATABASE_URL is set)")
+    parser.add_argument(
+        "--current-season-only",
+        action="store_true",
+        help=(
+            "Only pull each league's single most recent configured/discovered year, skipping older "
+            "(already-final) seasons. Used by pull-data.yml's frequent game-day cron -- see its "
+            "FULL_PULL step comment -- so a run doesn't re-fetch every past season's full boxscore "
+            "history (dozens of ESPN API calls) every 5 minutes just to catch this week's live score."
+        ),
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     leagues_config = cfg.get("leagues") or []
     sqlite_path = args.sqlite if args.sqlite is not None else cfg.get("sqlite", "fantasy_grand_prix.db")
 
-    run_pipeline(leagues_config, sqlite_path or None)
+    run_pipeline(leagues_config, sqlite_path or None, current_season_only=args.current_season_only)
 
 
 if __name__ == "__main__":

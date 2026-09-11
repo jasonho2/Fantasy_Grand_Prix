@@ -162,10 +162,20 @@ Turso via the other two secrets. Nothing sensitive is ever committed to
 the repo.
 
 It's scheduled for every 5 minutes on Thursday/Sunday/Monday (the NFL's
-primary game days) to avoid burning Actions minutes the rest of the week --
-edit the `cron:` line in the workflow file to change that. You can also
-trigger a pull on demand any time from the repo's **Actions** tab ->
-"Pull fantasy data" -> **Run workflow**, no terminal needed.
+primary game days) to avoid burning Actions minutes the rest of the week,
+plus once daily the rest of the week -- edit the `cron:` lines in the
+workflow file to change either. You can also trigger a pull on demand any
+time from the repo's **Actions** tab -> "Pull fantasy data" -> **Run
+workflow**, no terminal needed.
+
+The frequent (every-5-minute) runs only re-pull each league's *current*
+season -- re-fetching an already-final season from a year or two ago on
+every single run added up to real minutes of wasted API calls for data
+that was never going to change. The once-daily run (and a manual "Run
+workflow" with its `full_pull` checkbox ticked) pulls every configured
+season instead, to catch the rare correction to an older season. See
+`pipeline.py`'s `--current-season-only` flag and the workflow file's own
+comments for the full reasoning.
 
 ### Manual refresh from the site itself
 
@@ -385,7 +395,10 @@ and rerunning is all it takes to change a window's boundaries.
   (OneDrive/Dropbox/etc.), at the cost of crash-safety that doesn't matter
   for a periodically-rerun batch load.
 - If the GitHub repo is **private**, scheduled Actions runs count against a
-  monthly free-tier minutes cap (public repos don't have this limit). Each
-  run of `pull-data.yml` is quick, but if you widen the cron schedule (more
-  often, more days) and start seeing runs skipped/queued, that's why --
-  either make the repo public or trim the schedule.
+  monthly free-tier minutes cap (public repos don't have this limit). The
+  frequent (current-season-only) runs are quick; the once-daily full pull
+  and any manual full-pull run take longer -- one ESPN API call per played
+  week, per configured season -- so if you widen either schedule (more
+  often, more days, more seasons in `config.example.json`) and start
+  seeing runs skipped/queued, that's why -- either make the repo public or
+  trim the schedule.

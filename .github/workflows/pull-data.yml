@@ -2,24 +2,34 @@ name: Pull fantasy data
 
 # Keeps the live site's Turso database fresh without anyone running the
 # pipeline by hand, for every league configured in config.example.json
-# (ESPN and/or Sleeper). Each run re-fetches every configured league/season
-# from scratch and upserts, so stat corrections in the days after a game
-# get picked up automatically on the next scheduled run -- there's no
-# separate "corrections" step.
+# (ESPN and/or Sleeper). Each run re-fetches and upserts -- there's no
+# separate "corrections" step -- but which SEASONS a given run covers
+# depends on which trigger fired it (see the FULL_PULL step below):
+# the frequent game-day schedule only re-pulls each league's current
+# season, while a once-daily schedule (and manual runs, optionally)
+# do a full pull of every configured season. Re-fetching a season from
+# a year or two ago -- one ESPN API call per played week, every time --
+# on every single frequent run was pure waste: that data is long since
+# final and was never going to change, and doing it anyway is what made
+# every run take 12-37+ minutes instead of well under one, which in turn
+# meant runs piled up faster than they finished and the site's "Data as
+# of" indicator stalled instead of moving every 5 minutes as intended.
 #
-# Schedule: every 5 minutes, but only on/around the NFL's primary game days
-# (Thu/Sun/Mon) to avoid burning Actions minutes the rest of the week.
-# Adjust the cron expressions below, or just use "Run workflow" in the
-# Actions tab for an on-demand pull any time.
+# Schedule: every 5 minutes (current season only), but only on/around the
+# NFL's primary game days (Thu/Sun/Mon) to avoid burning Actions minutes
+# the rest of the week, plus once daily (every season) to catch older-
+# season corrections and to cover the non-game days the frequent schedule
+# skips. Adjust the cron expressions below, or just use "Run workflow" in
+# the Actions tab for an on-demand pull any time.
 #
 # Every-5-minutes is specifically so the Matchups page's live in-progress
 # scores (see platforms/espn.py's live_week detection, and the
 # live_matchups table in db.py) stay close to real-time during games, not
-# just so Tuesday's final stat corrections land a little faster -- a
-# decided week would show up just as correctly on a slower cadence.
-# GitHub's own scheduling is best-effort, not exact -- a run can slip by a
-# few minutes during periods of high platform load, so "every 5 minutes"
-# means "about every 5 minutes," not a hard guarantee.
+# just so a stat correction lands a little faster -- a decided week would
+# show up just as correctly on a slower cadence. GitHub's own scheduling
+# is best-effort, not exact -- a run can slip by a few minutes during
+# periods of high platform load, so "every 5 minutes" means "about every
+# 5 minutes," not a hard guarantee.
 #
 # GitHub Actions cron is UTC, but this league runs on Pacific time (see
 # Nav.js's formatDataAsOf). A ~5:15pm PT Thursday/Monday night kickoff is
@@ -36,9 +46,15 @@ name: Pull fantasy data
 # long with overtime, without running all day on days with no game.
 on:
   schedule:
-    - cron: "*/5 * * * 0,1,4" # Sun/Mon/Thu, all day UTC
-    - cron: "*/5 0-5 * * 2,5" # early UTC hours Tue/Fri -- MNF/TNF spillover past UTC midnight
-  workflow_dispatch: {}
+    - cron: "*/5 * * * 0,1,4" # Sun/Mon/Thu, all day UTC -- current season only
+    - cron: "*/5 0-5 * * 2,5" # early UTC hours Tue/Fri -- MNF/TNF spillover past UTC midnight -- current season only
+    - cron: "0 9 * * *" # once daily, ~2am Pacific (any day, any time of year) -- full pull, every configured season
+  workflow_dispatch:
+    inputs:
+      full_pull:
+        description: "Pull every configured season, not just the current one (slower)"
+        type: boolean
+        default: false
 
 jobs:
   pull:
@@ -99,4 +115,20 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-        run: python pipeline.py --config config.json
+          # True for the once-daily "0 9 * * *" schedule (see the file's
+          # top comment) or a manual run with the full_pull checkbox
+          # ticked; false for every other trigger, including the site's
+          # own Refresh Now button (api/refresh/route.js dispatches with
+          # no inputs, which default to full_pull: false) -- so that
+          # button stays the fast, current-season-only path it's meant
+          # for, and the "Run workflow" button in the Actions tab can
+          # still be used for an occasional deliberate full re-sync.
+          FULL_PULL: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 9 * * *') || github.event.inputs.full_pull == 'true' }}
+        run: |
+          if [ "$FULL_PULL" = "true" ]; then
+            echo "Full pull: fetching every configured season for every league."
+            python pipeline.py --config config.json
+          else
+            echo "Current-season-only pull (frequent game-day refresh)."
+            python pipeline.py --config config.json --current-season-only
+          fi
