@@ -81,7 +81,7 @@ export async function GET(request) {
   // the Fantasy Points Trend chart -- no more separate regular-season/
   // playoff split, since the frontend now renders one consolidated chart
   // with a divider line instead of two side-by-side ones.
-  const weekly = await query(
+  const decidedWeekly = await query(
     `SELECT wmp.week, m.manager_name AS manager, t.team_name AS team, wmp.points
      FROM weekly_manager_points wmp
      JOIN teams t ON t.team_id = wmp.team_id
@@ -90,6 +90,43 @@ export async function GET(request) {
      ORDER BY wmp.week, team`,
     [season, league]
   );
+
+  // The single week currently being played (if any) -- provisional team
+  // totals pulled fresh each pipeline run, same source as
+  // api/contests/route.js's own live merge (see live_matchups' schema
+  // comment in db.py). Folded into `weekly` below so the Weekly/Grand-Prix
+  // Points Trend charts move live as games happen, same as Contests'
+  // cup rankings already do -- but deliberately NOT folded into
+  // weeklyRecords above, which stays decided-only: a W-L record can't be
+  // known until a matchup is actually final, the way a raw point total
+  // reasonably can be shown provisionally.
+  const liveRows = await query(
+    `SELECT lm.week,
+            hm.manager_name AS home_manager,
+            ht.team_name AS home_team,
+            lm.home_points,
+            am.manager_name AS away_manager,
+            at.team_name AS away_team,
+            lm.away_points,
+            lm.is_bye
+     FROM live_matchups lm
+     JOIN teams ht ON ht.team_id = lm.home_team_id
+     JOIN managers hm ON hm.manager_id = ht.manager_id
+     LEFT JOIN teams at ON at.team_id = lm.away_team_id
+     LEFT JOIN managers am ON am.manager_id = at.manager_id
+     WHERE lm.season = ? AND lm.league_id = (SELECT league_id FROM leagues WHERE slug = ?)
+     ORDER BY lm.week`,
+    [season, league]
+  ).catch(() => []); // tolerate a not-yet-migrated DB that lacks live_matchups
+
+  const liveWeekly = []; // same shape as decidedWeekly
+  for (const row of liveRows) {
+    liveWeekly.push({ week: row.week, manager: row.home_manager, team: row.home_team, points: row.home_points });
+    if (!row.is_bye && row.away_manager != null) {
+      liveWeekly.push({ week: row.week, manager: row.away_manager, team: row.away_team, points: row.away_points });
+    }
+  }
+  const weekly = [...decidedWeekly, ...liveWeekly];
 
   // Grand Prix (Mario Kart placement) points, same idea as the Contests
   // page's Solo mode but computed across the whole season rather than

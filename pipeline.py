@@ -142,6 +142,7 @@ def _pull_one_league(conn, league_cfg):
                 data["player_rows"],
                 data["matchup_records"],
                 data.get("live_matchup_records"),
+                data.get("live_player_rows"),
                 data.get("team_logo"),
             )
             reg_weeks = (

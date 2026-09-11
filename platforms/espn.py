@@ -317,6 +317,13 @@ def pull_season(conn, league_config, year, external_season_id):
     # it just means this run doesn't have a live update, and the next
     # scheduled run (5 minutes later on a game day) tries again.
     live_matchup_records = []
+    # Per-player rows for the live week, same shape as player_rows -- kept
+    # around (not just aggregated into live_points_by_team below) so
+    # load_season can also write them into live_player_points at per-player
+    # granularity, for Players & Positions. Initialized empty here so a
+    # failed/skipped live pull always returns a valid (empty) list rather
+    # than leaving this undefined.
+    live_player_rows = []
     if live_week is not None and live_pairings:
         try:
             live_player_rows = build_player_points_rows(
@@ -346,6 +353,7 @@ def pull_season(conn, league_config, year, external_season_id):
         except Exception as exc:  # noqa: BLE001 -- see comment above
             print(f"    Could not pull live week {live_week}: {exc}", file=sys.stderr)
             live_matchup_records = []
+            live_player_rows = []
 
     return {
         "platform": PLATFORM,
@@ -358,4 +366,5 @@ def pull_season(conn, league_config, year, external_season_id):
         "matchup_records": matchup_records,
         "live_week": live_week,
         "live_matchup_records": live_matchup_records,
+        "live_player_rows": live_player_rows,
     }

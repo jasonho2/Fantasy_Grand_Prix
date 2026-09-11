@@ -90,18 +90,33 @@ live_matchups           one row per team for whichever single week is
                         matchup data then flows through the normal
                         `matchups` table/pipeline as always. Read by
                         api/matchups/route.js (merged into the schedule
-                        response with is_live: true) and by
+                        response with is_live: true), by
                         api/contests/route.js (folded straight into the
                         same Solo/Double Dash ranking pipeline as decided
-                        weeks, so cup point totals move live) -- but NOT by
-                        api/standings/route.js, which only reads the real
-                        `matchups` table: a W-L record can't be known until
-                        a matchup is actually decided the way a point-total
-                        cup ranking reasonably can be shown provisionally.
-                        Points here come from a fresh boxscore pull
-                        (starter stat lines), same bonus-free source as
-                        every decided week and every bye week -- never
-                        ESPN's live totalPoints directly.
+                        weeks, so cup point totals move live), and by
+                        api/standings/route.js's `weekly`/gpWeekly series
+                        (the Weekly/Grand-Prix Points Trend charts) -- but
+                        NOT by its `weeklyRecords` (the Season Leaderboard
+                        table's W-L/points-for/against): a W-L record can't
+                        be known until a matchup is actually decided the
+                        way a point total reasonably can be shown
+                        provisionally. Points here come from a fresh
+                        boxscore pull (starter stat lines), same
+                        bonus-free source as every decided week and every
+                        bye week -- never ESPN's live totalPoints directly.
+live_player_points      one row per starting-lineup player for whichever
+                        single week is currently being played (if any) --
+                        the same live pull as live_matchups, just at
+                        per-player granularity instead of summed per team,
+                        since Players & Positions needs individual player
+                        stats rather than a team total. Same
+                        wholesale-replace-every-run convention as
+                        live_matchups (see above) -- never a history
+                        table, never more than one week's worth of rows.
+                        Read by api/players/route.js, unioned with decided
+                        `weekly_player_points` rows so the Player Totals
+                        table and Points-by-Position chart both include
+                        the in-progress week's provisional stats.
 """
 
 import os
@@ -239,6 +254,22 @@ CREATE TABLE IF NOT EXISTS live_matchups (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_live_matchups_league_season ON live_matchups(league_id, season);
+
+-- Same wholesale-replace-every-run convention as live_matchups above, just
+-- at per-player granularity (see the docstring's live_player_points entry)
+-- so Players & Positions can show the in-progress week's provisional
+-- per-player stats, not just a team total.
+CREATE TABLE IF NOT EXISTS live_player_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id INTEGER NOT NULL REFERENCES leagues(league_id),
+    season INTEGER NOT NULL,
+    week INTEGER NOT NULL,
+    team_id INTEGER NOT NULL REFERENCES teams(team_id),
+    player_id INTEGER NOT NULL REFERENCES players(player_id),
+    points REAL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_live_player_points_league_season ON live_player_points(league_id, season);
 
 CREATE TABLE IF NOT EXISTS contest_windows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -591,6 +622,7 @@ def load_season(
     player_rows,
     matchup_records,
     live_matchup_records=None,
+    live_player_records=None,
     team_logo=None,
 ):
     """
@@ -615,6 +647,12 @@ def load_season(
                       every week is currently decided) -- so a week that WAS
                       live in a previous run and has since been decided
                       doesn't leave a stale row behind.
+    live_player_records: same shape as player_rows, but for the single
+                      week currently in progress (if any) -- see the
+                      live_player_points table's schema comment up top.
+                      Always fully replaces this league/season's
+                      live_player_points rows, same convention (and same
+                      reasoning) as live_matchup_records above.
     """
     team_logo = team_logo or {}
     team_id_map = {}  # platform_team_id (as given) -> internal teams.team_id
@@ -714,6 +752,26 @@ def load_season(
                 m["away_points"],
                 int(m["is_bye"]),
             ),
+        )
+
+    # Same full-replace convention as live_matchups above, just at
+    # per-player granularity -- see live_player_points' schema comment.
+    # Player/team lookups reuse team_id_map (already built above) and
+    # get_or_create_player, same as the decided player_rows loop, so a
+    # player who's only ever appeared in a live (not-yet-decided) week
+    # still gets created normally.
+    conn.execute("DELETE FROM live_player_points WHERE league_id = ? AND season = ?", (league_id, year))
+    for row in live_player_records or []:
+        player_id = get_or_create_player(
+            conn, platform, row.get("platform_player_id"), row["player"], row["position"]
+        )
+        team_id = team_id_map.get(row["platform_team_id"])
+        if team_id is None:
+            continue
+        conn.execute(
+            """INSERT INTO live_player_points (league_id, season, week, team_id, player_id, points, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+            (league_id, row["season"], row["week"], team_id, player_id, row["points"]),
         )
 
     conn.commit()
