@@ -113,6 +113,33 @@ function computeStandings(weeklyRecords, rangeMin, rangeMax) {
   }));
 }
 
+// Approximates the "nice round number" tick-spacing algorithm Recharts
+// uses internally by default (step sizes are 1, 2, or 5 times a power of
+// ten) so the Y-axis can keep the exact same tick spacing/labels it would
+// have shown before, while the actual plotted scale (domain) is
+// independently extended further below (see yAxisDomainMax) to make room
+// for the end-of-line team logo. Recharts doesn't expose a way to pad the
+// scale without also re-deriving ticks from that padded domain, so ticks
+// are computed here instead of left to Recharts' auto-generation.
+function niceTicks(max, count = 5) {
+  if (!(max > 0)) return null;
+  const rawStep = max / count;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const niceNormalized = normalized < 1.5 ? 1 : normalized < 3 ? 2 : normalized < 7 ? 5 : 10;
+  const step = niceNormalized * magnitude;
+  const niceMax = Math.ceil(max / step) * step;
+  const ticks = [];
+  // Round(t/step)*step keeps every tick an exact multiple of step (0, 20,
+  // 40, ... instead of drifting by iterated floating-point addition), and
+  // the outer round-to-6-decimals cleans up the sub-1 case (a step like
+  // 0.1 would otherwise produce e.g. 0.30000000000000004).
+  for (let t = 0; t <= niceMax + step / 2; t += step) {
+    ticks.push(Math.round((Math.round(t / step) * step) * 1e6) / 1e6);
+  }
+  return { ticks, niceMax };
+}
+
 // One consolidated trend chart (covers the full season, weeks 1-N, not
 // split into separate regular-season/playoff charts) with a Weekly/
 // Cumulative toggle and an optional divider line at the regular-season/
@@ -152,14 +179,19 @@ function TrendChart({
   // The end-of-line team logo (see ChartTeamLogoDot) is centered on its
   // team's last plotted value -- if that value sits right at the axis's
   // auto-fit max, the logo's top half pokes past the plot area and gets
-  // clipped. Padding the axis ceiling 15% above the highest value actually
-  // being drawn (only visibleTeams, not every team, so isolating one team
-  // doesn't reserve headroom for a higher-scoring team that isn't even
-  // shown) gives every logo room to sit fully inside the chart regardless
-  // of which team currently has the top line. Falls back to Recharts' own
-  // auto domain when there's no positive data yet (empty/all-null range),
-  // rather than forcing a degenerate [0, 0] domain.
-  const yAxisMax = useMemo(() => {
+  // clipped. yAxisDomainMax pads the scale's ceiling 15% above the highest
+  // value actually being drawn (only visibleTeams, not every team, so
+  // isolating one team doesn't reserve headroom for a higher-scoring team
+  // that isn't even shown) so every logo has room, regardless of which
+  // team currently has the top line -- but yAxisTicks keeps the same nice
+  // round-number tick spacing/labels the un-padded data would have shown
+  // (see niceTicks above), so the axis doesn't grow an extra tick at that
+  // padded ceiling. Domain is widened to at least the last tick (never
+  // smaller than it) so a tick never renders past the visible scale. Both
+  // are null/undefined when there's no positive data yet (empty/all-null
+  // range), falling back to Recharts' own auto domain/ticks rather than a
+  // degenerate [0, 0] domain.
+  const { yAxisDomainMax, yAxisTicks } = useMemo(() => {
     let max = 0;
     for (const row of rows) {
       for (const team of visibleTeams) {
@@ -167,7 +199,12 @@ function TrendChart({
         if (typeof v === "number" && v > max) max = v;
       }
     }
-    return max > 0 ? Math.ceil(max * 1.15) : null;
+    const nice = niceTicks(max);
+    if (!nice) return { yAxisDomainMax: null, yAxisTicks: undefined };
+    return {
+      yAxisDomainMax: Math.max(nice.niceMax, Math.ceil(max * 1.15)),
+      yAxisTicks: nice.ticks,
+    };
   }, [rows, visibleTeams]);
 
   // Built from the full team list, not just currently-rendered lines, so
@@ -227,7 +264,8 @@ function TrendChart({
             />
             <YAxis
               stroke="#9aa1ad"
-              domain={yAxisMax != null ? [0, yAxisMax] : ["auto", "auto"]}
+              domain={yAxisDomainMax != null ? [0, yAxisDomainMax] : ["auto", "auto"]}
+              ticks={yAxisTicks}
               label={
                 yAxisLabel ? { value: yAxisLabel, angle: -90, position: "insideLeft", fill: "#9aa1ad" } : undefined
               }
