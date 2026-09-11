@@ -547,7 +547,12 @@ function ContestPanel({ contest, league, season, logos }) {
           <table className="contests-table">
             <thead>
               <tr>
-                <th>Rank</th>
+                {/* No label -- the cells below already read "1st", "2nd",
+                    etc., so a "Rank" header would only add width the
+                    column doesn't otherwise need (this matters most on
+                    narrow/mobile screens). aria-label keeps it named for
+                    screen readers despite the empty visual header. */}
+                <th aria-label="Rank" />
                 <th className="sticky-col">Team</th>
                 {contest.weeks.map((wk) => (
                   <th key={wk} title={wk === contest.liveWeek ? "Game in progress -- scores still updating" : undefined}>
@@ -566,7 +571,7 @@ function ContestPanel({ contest, league, season, logos }) {
             <tbody>
               {sortedLeaderboard.map((row) => (
                 <tr key={row.team} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
-                  <td>{row.displayRank}</td>
+                  <td>{ordinal(row.displayRank)}</td>
                   <td className="sticky-col">
                     <span
                       className="wrap-cell"
