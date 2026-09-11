@@ -443,8 +443,21 @@ function ContestPanel({ contest, league, season, logos }) {
       {/* Edits the point table for whichever mode is currently selected
           above -- reopening it after switching Solo/Double Dash shows that
           mode's own (possibly different) overrides, per spec: point entry
-          comes after the mode choice, not alongside it. */}
+          comes after the mode choice, not alongside it. A one-click "Reset
+          to Default" sits to its left, always visible (disabled when
+          there's no personal override to clear) so getting back to this
+          cup's league-configured default doesn't require opening the
+          editor first. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <button
+          type="button"
+          className="week-chip"
+          onClick={() => saveCustomPointTable(null)}
+          disabled={!customPointTable}
+          title={!customPointTable ? "No personal point overrides to reset -- already showing the league default" : undefined}
+        >
+          Reset to Default
+        </button>
         <button type="button" className="week-chip" onClick={() => setEditingPoints((v) => !v)}>
           {editingPoints ? "Close Point System" : "Change Point System"}
         </button>
