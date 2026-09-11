@@ -1,4 +1,10 @@
 import { query } from "@/lib/db";
+import {
+  placementPointsFor,
+  effectiveDefaultTable,
+  defaultModeForCup,
+  normalizeCupWeeks,
+} from "@/lib/scoring";
 
 // Point-total side-contests within one league's season (e.g. weeks 1-4,
 // 5-8, 9-12, 13-16). Cup names/count/order are configured per league in
@@ -37,32 +43,18 @@ import { query } from "@/lib/db";
 //
 // GET /api/contests?league=<slug>&season=2025
 
-// These are the *default* placement -> points tables, used for the
-// contest_points/rank/rankDelta this route returns. A user can override
-// them per cup+mode from the "Change Point System" editor on the Grand
-// Prix page -- that's a client-side-only preference (see applyCustomScoring
-// in contests/page.js), which is why weekly_rank/weekly_fantasy are also
+// The *default* placement -> points tables used for the contest_points/
+// rank/rankDelta this route returns are no longer fixed globally -- each
+// league can configure its own default per cup (see web/lib/scoring.js and
+// the `leagues.scoring_config` column), falling back to
+// DEFAULT_POINT_TABLES (plain Solo, no overrides) for any league that never
+// configured one. A viewer can additionally layer a personal override per
+// cup+mode from the "Change Point System" editor on the Grand Prix page --
+// that's a client-side-only preference (see applyCustomScoring in
+// contests/page.js), which is why weekly_rank/weekly_fantasy are also
 // included on every leaderboard row below: they're the raw ingredients the
 // frontend needs to re-derive everything under a custom table without a
-// separate API shape per override. If DEFAULT_POINT_TABLES in
-// contests/page.js ever drifts from these two arrays, the frontend's
-// "blank means use the default" behavior will silently use the wrong
-// default -- keep them in sync.
-//
-// Indexed by rank - 1 (rank 1 -> POINT_TABLE[0]). Sized for a 12-team
-// league; a team placing beyond this list scores 0.
-const POINT_TABLE = [12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-// Double Dash pairs up a 12-team league into 6 pairs, so only 6 placements
-// exist most weeks; a pair placing beyond this list scores 0.
-const DOUBLE_DASH_POINT_TABLE = [12, 10, 9, 8, 7, 5];
-
-function placementPoints(rank) {
-  return rank - 1 < POINT_TABLE.length ? POINT_TABLE[rank - 1] : 0;
-}
-
-function placementPointsDoubleDash(rank) {
-  return rank - 1 < DOUBLE_DASH_POINT_TABLE.length ? DOUBLE_DASH_POINT_TABLE[rank - 1] : 0;
-}
+// separate API shape per override.
 
 // The two supported Grand Prix cup lengths, viewable via ?cupWeeks=15|16 --
 // independent of season (see below), since the cup leaderboard is already
@@ -99,15 +91,32 @@ export async function GET(request) {
   if (!season || !league) {
     return Response.json({ error: "season and league query params are required" }, { status: 400 });
   }
-  const cupWeeks = params.get("cupWeeks") === "15" ? 15 : 16; // anything other than "15" defaults to the new 16-week policy
-
-  const nameRows = await query(
-    `SELECT COALESCE(l.display_name, ls.league_name) AS name
+  // League-scoped row carrying both the display name and this league's
+  // configured Grand Prix defaults. Selecting cup_weeks/scoring_config here
+  // (rather than a separate query) means a not-yet-migrated DB -- one the
+  // Python pipeline hasn't reconnected to since these columns were added --
+  // fails this whole query and falls back to [] below, same tolerate-missing
+  // pattern used elsewhere in this route (see the live_matchups query).
+  const leagueRows = await query(
+    `SELECT COALESCE(l.display_name, ls.league_name) AS name, l.cup_weeks AS cupWeeks, l.scoring_config AS scoringConfigRaw
      FROM leagues l LEFT JOIN league_seasons ls ON ls.league_id = l.league_id AND ls.season = ?
      WHERE l.slug = ?`,
     [season, league]
   ).catch(() => []);
-  const leagueName = nameRows[0]?.name ?? null;
+  const leagueName = leagueRows[0]?.name ?? null;
+  // ?cupWeeks explicitly wins when present (the live viewer-facing toggle);
+  // otherwise fall back to this league's configured default, then 16.
+  const cupWeeksParam = params.get("cupWeeks");
+  const cupWeeks =
+    cupWeeksParam === "15" || cupWeeksParam === "16"
+      ? Number(cupWeeksParam)
+      : normalizeCupWeeks(leagueRows[0]?.cupWeeks);
+  let scoringConfig = null;
+  try {
+    scoringConfig = leagueRows[0]?.scoringConfigRaw ? JSON.parse(leagueRows[0].scoringConfigRaw) : null;
+  } catch {
+    scoringConfig = null; // malformed JSON somehow got stored -- treat exactly like "never configured"
+  }
 
   const configuredWindows = await query(
     `SELECT cw.id AS contest_id, cw.contest_name AS name, cw.start_week, cw.end_week, cw.sort_order
@@ -197,21 +206,24 @@ export async function GET(request) {
     if (!managerTeam.has(row.manager)) managerTeam.set(row.manager, row.team);
   }
 
-  // Rank each week's teams by that week's fantasy points, assign placement points.
+  // Rank each week's teams by that week's fantasy points. Placement points
+  // aren't assigned here anymore -- which table applies can differ per cup
+  // (a league's per-cup scoring config), so turning a rank into points
+  // happens later, inside buildLeaderboard, once it's known which cup's
+  // window a given week falls into.
   const byWeek = new Map();
   for (const row of allWeeklyRows) {
     if (!byWeek.has(row.week)) byWeek.set(row.week, []);
     byWeek.get(row.week).push(row);
   }
 
-  const ranked = []; // { week, manager, points, rank, placement_points }
+  const ranked = []; // { week, manager, points, rank }
   let maxWeek = 0; // latest week with ANY data, decided or live -- see maxDecidedWeek above for "final" gating
   for (const [week, teams] of byWeek) {
     maxWeek = Math.max(maxWeek, week);
     teams.sort((a, b) => b.points - a.points); // rows already came sorted; be explicit anyway
     teams.forEach((row, i) => {
-      const rank = i + 1;
-      ranked.push({ week, manager: row.manager, points: row.points, rank, placement_points: placementPoints(rank) });
+      ranked.push({ week, manager: row.manager, points: row.points, rank: i + 1 });
     });
   }
 
@@ -289,14 +301,13 @@ export async function GET(request) {
     }
   }
 
-  const doubleDashRanked = []; // { week, manager, points, rank, placement_points }
+  const doubleDashRanked = []; // { week, manager, points, rank }
   for (const [week, pairs] of pairsByWeek) {
     pairs.sort((a, b) => b.pairScore - a.pairScore);
     pairs.forEach((pair, i) => {
       const rank = i + 1;
-      const placement_points = placementPointsDoubleDash(rank);
       for (const member of pair.members) {
-        doubleDashRanked.push({ week, manager: member.manager, points: member.points, rank, placement_points });
+        doubleDashRanked.push({ week, manager: member.manager, points: member.points, rank });
       }
     });
   }
@@ -304,19 +315,24 @@ export async function GET(request) {
   // Sums a set of ranked rows into manager -> cumulative { contest_points,
   // fantasy_points }, the same reduction used for both the real leaderboard
   // and the "as of last week" snapshot used for rank-movement arrows below.
-  // byWeek keeps the raw rank and fantasy points too (not just the
-  // placement points from the *default* table), not needed for the totals
-  // here but carried through into buildLeaderboard's output below so the
-  // frontend can re-derive placement points from a user-supplied custom
-  // table without another round trip -- see weekly_rank/weekly_fantasy.
-  function sumByManager(rows) {
+  // `table` is the fully-resolved placement->points table *for this specific
+  // cup* (its configured default, from buildLeaderboard) -- turning a raw
+  // rank into placement points happens right here, not earlier, so the same
+  // rank in two different cups can score differently under a per-cup
+  // scoring config. byWeek keeps the raw rank and fantasy points too (not
+  // just this table's placement points), not needed for the totals here but
+  // carried through into buildLeaderboard's output below so the frontend can
+  // re-derive placement points from a user-supplied custom table without
+  // another round trip -- see weekly_rank/weekly_fantasy.
+  function sumByManager(rows, table) {
     const totals = new Map();
     for (const r of rows) {
       if (!totals.has(r.manager)) totals.set(r.manager, { contest_points: 0, fantasy_points: 0, byWeek: {} });
       const t = totals.get(r.manager);
-      t.contest_points += r.placement_points;
+      const placement_points = placementPointsFor(r.rank, table);
+      t.contest_points += placement_points;
       t.fantasy_points += r.points;
-      t.byWeek[r.week] = { rank: r.rank, points: r.points, placement_points: r.placement_points };
+      t.byWeek[r.week] = { rank: r.rank, points: r.points, placement_points };
     }
     return totals;
   }
@@ -338,8 +354,12 @@ export async function GET(request) {
   // (fed `ranked`) and Double Dash (fed `doubleDashRanked`) below, since
   // everything past "here are this window's ranked rows" (cumulative
   // totals, sort, rank, rank-movement-vs-last-week) is identical between
-  // the two modes.
-  function buildLeaderboard(rankedRows, w) {
+  // the two modes. `table` is this cup's fully-resolved default placement
+  // table for whichever mode is being built (see effectiveDefaultTable) --
+  // passed in by the caller rather than looked up in here, since it depends
+  // on both the cup index and the mode, neither of which this function
+  // otherwise needs to know about.
+  function buildLeaderboard(rankedRows, w, table) {
     const contestWeeks = [];
     for (let wk = w.start_week; wk <= w.end_week; wk++) contestWeeks.push(wk);
 
@@ -347,7 +367,7 @@ export async function GET(request) {
     const playedWeeksInWindow = [...new Set(inWindow.map((r) => r.week))].sort((a, b) => a - b);
     const latestPlayedWeek = playedWeeksInWindow[playedWeeksInWindow.length - 1];
 
-    const totals = sumByManager(inWindow);
+    const totals = sumByManager(inWindow, table);
 
     // Rank movement within this cup vs. the previous played week -- not
     // the previous week overall, since a cup only spans its own weeks.
@@ -355,7 +375,7 @@ export async function GET(request) {
     let previousRanks = new Map();
     if (playedWeeksInWindow.length >= 2) {
       const priorRows = inWindow.filter((r) => r.week < latestPlayedWeek);
-      previousRanks = rankByContestPoints(sumByManager(priorRows));
+      previousRanks = rankByContestPoints(sumByManager(priorRows, table));
     }
 
     return [...totals.entries()]
@@ -390,9 +410,15 @@ export async function GET(request) {
       });
   }
 
-  const contests = windows.map((w) => {
+  const contests = windows.map((w, i) => {
     const contestWeeks = [];
     for (let wk = w.start_week; wk <= w.end_week; wk++) contestWeeks.push(wk);
+
+    // This cup's configured default (falls back to plain Solo, no
+    // overrides, for a league that never set one) -- `i` lines up
+    // positionally with CUP_NAMES the same way weekOverrides does above.
+    const soloTable = effectiveDefaultTable(scoringConfig, i, "solo");
+    const doubleDashTable = effectiveDefaultTable(scoringConfig, i, "doubleDash");
 
     return {
       name: w.name,
@@ -407,8 +433,16 @@ export async function GET(request) {
       status:
         maxDecidedWeek >= w.end_week ? "final" : maxWeek >= w.start_week ? "in_progress" : "upcoming",
       liveWeek: liveWeek != null && liveWeek >= w.start_week && liveWeek <= w.end_week ? liveWeek : null,
-      leaderboard: buildLeaderboard(ranked, w),
-      doubleDashLeaderboard: buildLeaderboard(doubleDashRanked, w),
+      leaderboard: buildLeaderboard(ranked, w, soloTable),
+      doubleDashLeaderboard: buildLeaderboard(doubleDashRanked, w, doubleDashTable),
+      // Which mode/table the league configured as this cup's default --
+      // lets the frontend open on that mode and treat that table (not the
+      // plain built-in one) as what "Reset to Default" resets a viewer's
+      // personal override back to (see PointSystemEditor/DEFAULT_POINT_TABLES
+      // usage in contests/page.js) and what the scoring badge next to the
+      // cup title describes.
+      defaultMode: defaultModeForCup(scoringConfig, i),
+      defaultPointTable: { solo: soloTable, doubleDash: doubleDashTable },
     };
   });
 

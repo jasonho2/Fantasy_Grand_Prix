@@ -146,6 +146,12 @@ CREATE TABLE IF NOT EXISTS leagues (
                                           -- self-service ESPN leagues need an explicit year list from
                                           -- somewhere; config.json-defined leagues ignore this column
                                           -- entirely and use their own "years" list instead.
+    cup_weeks INTEGER,                    -- 15 or 16 -- this league's configured Grand Prix cup length,
+                                          -- used as the Contests page's default (still overridable live
+                                          -- via ?cupWeeks). NULL means "16, never explicitly configured."
+    scoring_config TEXT,                 -- JSON -- this league's configured default placement->points
+                                          -- scoring per cup (see web/lib/scoring.js). NULL means "plain
+                                          -- Solo, no overrides, for every cup."
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -363,6 +369,16 @@ COLUMN_MIGRATIONS = [
     # get_or_create_team(); NULL until the next pipeline run touches a
     # league sourced before this column existed.
     ("teams", "logo_url", "TEXT"),
+    # A league's configured Grand Prix defaults -- 15 vs 16 week cup
+    # structure, and the default placement->points scoring shown on the
+    # Contests page (see web/lib/scoring.js for the JSON shape/resolution
+    # rules). Set via the "Add a League" form or Manage Leagues' "Edit
+    # Scoring" action (web/app/api/leagues routes); NULL for any league
+    # that predates this feature or was never explicitly configured --
+    # api/contests/route.js treats NULL the same as "16 weeks, plain Solo,
+    # no point overrides."
+    ("leagues", "cup_weeks", "INTEGER"),
+    ("leagues", "scoring_config", "TEXT"),
 ]
 
 

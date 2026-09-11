@@ -604,6 +604,10 @@ tr:hover td {
 .badge.loss { background: rgba(255, 107, 107, 0.15); color: var(--loss); }
 .badge.tie { background: rgba(217, 182, 78, 0.15); color: var(--tie); }
 .badge.bye { background: rgba(154, 161, 173, 0.15); color: var(--text-dim); }
+/* A cup's league-configured default scoring format (Solo/Double Dash) --
+   see contests/page.js's ContestPanel. cursor: help hints that the title
+   attribute tooltip (the full placement->points table) is worth hovering. */
+.badge.scoring { background: rgba(91, 157, 255, 0.15); color: var(--accent); cursor: help; }
 
 .empty-state, .loading-state, .error-state {
   color: var(--text-dim);

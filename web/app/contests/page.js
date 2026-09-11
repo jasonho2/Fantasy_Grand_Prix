@@ -16,8 +16,10 @@ import LeagueSelect from "../components/LeagueSelect";
 import CupWeeksSelect from "../components/CupWeeksSelect";
 import TeamLogo from "../components/TeamLogo";
 import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/ChartTeamLogoDot";
+import PointsGrid from "../components/PointsGrid";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
+import { pointsForRank } from "../../lib/scoring";
 
 // Matches the palette used for the Standings/Players trend charts, for a
 // consistent look across the app's line charts.
@@ -26,21 +28,6 @@ const COLORS = [
   "#4dd4d4", "#ff9f5b", "#9fd35c", "#f06292", "#7986cb",
   "#a1887f", "#90a4ae",
 ];
-
-// Mirrors POINT_TABLE / DOUBLE_DASH_POINT_TABLE in api/contests/route.js --
-// used both as the placeholder shown in each blank point-entry box and as
-// the fallback value for any placement a custom table leaves blank. Keep in
-// sync with the API route if either ever changes.
-const DEFAULT_POINT_TABLES = {
-  solo: [12, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
-  doubleDash: [12, 10, 9, 8, 7, 5],
-};
-
-function ordinal(n) {
-  const suffixes = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return `${n}${suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]}`;
-}
 
 // A custom point table is a personal display preference, not shared server
 // state -- persisted client-side (localStorage), keyed per league+season+
@@ -85,19 +72,10 @@ function useCustomPointTable(key) {
   return [table, save];
 }
 
-// A blank/undefined slot in a custom table falls back to that placement's
-// default value; an unranked week (bye/unplayed -- rank null) stays null
-// rather than 0, so charts/table cells can keep showing "--" for it.
-function pointsForRank(rank, table, defaults) {
-  if (rank == null) return null;
-  const idx = rank - 1;
-  const override = table ? table[idx] : undefined;
-  if (override !== undefined && override !== null && override !== "") {
-    const n = Number(override);
-    if (Number.isFinite(n)) return n;
-  }
-  return idx < defaults.length ? defaults[idx] : 0;
-}
+// pointsForRank (imported from ../../lib/scoring) treats a blank/undefined
+// slot in a custom table as "use that placement's default value"; an
+// unranked week (bye/unplayed -- rank null) stays null rather than 0, so
+// charts/table cells can keep showing "--" for it.
 
 // Re-derives weekly_points/contest_points/rank/rankDelta for one cup+mode's
 // leaderboard using a custom placement -> points table, from the
@@ -186,29 +164,8 @@ function PointSystemEditor({ mode, defaults, value, onSave, onReset, onCancel })
         Points awarded for each weekly placement in {mode === "solo" ? "Solo" : "Double Dash"} mode.
         Leave a box blank to keep the default for that placement.
       </p>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))",
-          gap: 10,
-          marginBottom: 14,
-        }}
-      >
-        {defaults.map((def, i) => (
-          <label
-            key={i}
-            style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-dim)" }}
-          >
-            {ordinal(i + 1)}
-            <input
-              type="number"
-              className="week-number-input"
-              placeholder={String(def)}
-              value={draft[i]}
-              onChange={(e) => update(i, e.target.value)}
-            />
-          </label>
-        ))}
+      <div style={{ marginBottom: 14 }}>
+        <PointsGrid defaults={defaults} draft={draft} onChange={update} />
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button type="button" className="week-chip selected" onClick={handleSave}>
@@ -299,8 +256,10 @@ function ContestPanel({ contest, league, season, logos }) {
   // or Double Dash (that week's real head-to-head matchup pairs combine
   // scores and get ranked as a pair -- see the contests API route for the
   // full scoring rules). Independent of the Sort by toggle below, which
-  // only changes display order within whichever mode is selected.
-  const [mode, setMode] = useState("solo");
+  // only changes display order within whichever mode is selected. Opens on
+  // this cup's league-configured default mode (contest.defaultMode) rather
+  // than always Solo -- see api/contests/route.js's defaultModeForCup.
+  const [mode, setMode] = useState(() => (contest.defaultMode === "doubleDash" ? "doubleDash" : "solo"));
   // Descending only, per spec -- just which column, not direction.
   const [sortBy, setSortBy] = useState("contest_points");
   const [view, setView] = useState("table");
@@ -311,7 +270,11 @@ function ContestPanel({ contest, league, season, logos }) {
   const [editingPoints, setEditingPoints] = useState(false);
 
   const modeLeaderboard = mode === "solo" ? contest.leaderboard : contest.doubleDashLeaderboard;
-  const defaultPointTable = mode === "solo" ? DEFAULT_POINT_TABLES.solo : DEFAULT_POINT_TABLES.doubleDash;
+  // This cup's league-configured default table for the active mode (already
+  // fully resolved server-side -- see api/contests/route.js) -- what a
+  // viewer's personal override (below) falls back to for any placement left
+  // blank, and what "Reset to Default" resets a personal override back to.
+  const defaultPointTable = mode === "solo" ? contest.defaultPointTable.solo : contest.defaultPointTable.doubleDash;
 
   // "Change Point System" lets the viewer override how many points each
   // weekly placement is worth, per cup and per mode -- comes after the
@@ -391,10 +354,18 @@ function ContestPanel({ contest, league, season, logos }) {
     : effectiveLeaderboard;
 
   const Icon = CUP_ICONS[contest.name];
+  // This cup's league-configured default scoring, always shown regardless
+  // of whichever mode the Mode toggle currently has selected -- tells a
+  // viewer what the "official" scoring is for this cup, and what "Reset to
+  // Default" in the point-system editor above brings a personal override
+  // back to. Hovering/tapping the badge reveals the full placement table.
+  const defaultModeLabel = contest.defaultMode === "doubleDash" ? "Double Dash" : "Solo";
+  const defaultModeTable =
+    contest.defaultMode === "doubleDash" ? contest.defaultPointTable.doubleDash : contest.defaultPointTable.solo;
 
   return (
     <div className="panel">
-      <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <h2 style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         {typeof Icon === "string" ? (
           <span style={{ fontSize: 22, lineHeight: 1 }} aria-hidden="true">{Icon}</span>
         ) : (
@@ -402,6 +373,9 @@ function ContestPanel({ contest, league, season, logos }) {
         )}
         {contest.name} (Weeks {contest.start_week}-{contest.end_week}){" "}
         <span className={`badge ${STATUS_BADGE_CLASS[contest.status]}`}>{STATUS_LABEL[contest.status]}</span>
+        <span className="badge scoring" title={`Weekly placement points: ${defaultModeTable.join("-")}`}>
+          {defaultModeLabel}
+        </span>
       </h2>
 
       {/* Two independent toggle groups (Sort by, then Mode) laid out on a

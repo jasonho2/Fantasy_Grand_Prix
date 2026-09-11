@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { query } from "@/lib/db";
+import { normalizeCupWeeks, normalizeScoringConfig } from "@/lib/scoring";
 
 // Self-service "add a league". This site has no login, so the two
 // platforms are handled very differently:
@@ -21,9 +22,18 @@ import { query } from "@/lib/db";
 // here that config.json doesn't already cover and pulls it (see
 // pipeline.py's docstring).
 //
+// Both platforms also accept the same two optional Grand Prix defaults,
+// set from the "Grand Prix settings" picker on the Add League form (see
+// web/lib/scoring.js for the JSON shape/resolution rules, and
+// web/app/leagues/new/page.js for the UI): `cupWeeks` (15 or 16, defaults to
+// 16) and `scoringConfig` (this league's default placement->points scoring
+// per cup, defaults to plain Solo with no overrides). Both are also
+// editable later via PATCH /api/leagues/<slug> (see that route's own
+// comment) -- registering a league doesn't lock them in forever.
+//
 // POST /api/leagues
-//   Sleeper: { platform: "sleeper", sleeperLeagueId, displayName? }
-//   ESPN:    { platform: "espn", espnLeagueId, espnS2?, espnSwid?, years?, displayName?, passphrase }
+//   Sleeper: { platform: "sleeper", sleeperLeagueId, displayName?, cupWeeks?, scoringConfig? }
+//   ESPN:    { platform: "espn", espnLeagueId, espnS2?, espnSwid?, years?, displayName?, passphrase, cupWeeks?, scoringConfig? }
 
 function slugify(base) {
   return base
@@ -45,6 +55,46 @@ async function reserveSlug(baseSlug, matchesExisting) {
     slug = `${baseSlug}-${i}`;
   }
   return slug;
+}
+
+// Registers/updates a league row, tolerating a not-yet-migrated DB that
+// lacks the cup_weeks/scoring_config columns (added well after this table
+// first shipped -- see db.py's COLUMN_MIGRATIONS). Those columns only exist
+// once the Python pipeline has reconnected at least once since they were
+// added; until then, this falls back to the pre-existing INSERT shape
+// rather than 500ing on every new league registration in the meantime --
+// the Grand Prix defaults just don't stick yet, and can be set again later
+// via Manage Leagues once the pipeline has caught up.
+async function upsertLeague({ platform, slug, displayName, sleeperLeagueId, espnFields, cupWeeks, scoringConfig }) {
+  const isEspn = platform === "espn";
+  const baseCols = isEspn
+    ? ["platform", "slug", "display_name", "espn_league_id", "espn_s2", "espn_swid", "pull_years"]
+    : ["platform", "slug", "display_name", "sleeper_league_id"];
+  const baseVals = isEspn
+    ? ["espn", slug, displayName, espnFields.espnLeagueId, espnFields.espnS2, espnFields.espnSwid, espnFields.pullYearsJson]
+    : ["sleeper", slug, displayName, sleeperLeagueId];
+  const baseUpdates = isEspn
+    ? "display_name = excluded.display_name, espn_league_id = excluded.espn_league_id, espn_s2 = excluded.espn_s2, espn_swid = excluded.espn_swid, pull_years = excluded.pull_years"
+    : "display_name = excluded.display_name, sleeper_league_id = excluded.sleeper_league_id";
+
+  try {
+    await query(
+      `INSERT INTO leagues (${baseCols.join(", ")}, cup_weeks, scoring_config)
+       VALUES (${baseCols.map(() => "?").join(", ")}, ?, ?)
+       ON CONFLICT(slug) DO UPDATE SET ${baseUpdates}, cup_weeks = excluded.cup_weeks, scoring_config = excluded.scoring_config`,
+      [...baseVals, cupWeeks, JSON.stringify(scoringConfig)]
+    );
+    return true;
+  } catch (err) {
+    console.error("Insert with cup_weeks/scoring_config failed, falling back (DB likely not yet migrated):", err);
+    await query(
+      `INSERT INTO leagues (${baseCols.join(", ")})
+       VALUES (${baseCols.map(() => "?").join(", ")})
+       ON CONFLICT(slug) DO UPDATE SET ${baseUpdates}`,
+      baseVals
+    );
+    return false;
+  }
 }
 
 function passphraseOk(submitted) {
@@ -105,17 +155,12 @@ async function handleSleeper(body) {
   const displayName = requestedDisplayName || sleeperLeague.name || null;
   const baseSlug = slugify(displayName || `sleeper-${sleeperLeagueId}`) || `sleeper-${sleeperLeagueId}`;
   const slug = await reserveSlug(baseSlug, (row) => row.sleeper_league_id === sleeperLeagueId);
+  const cupWeeks = normalizeCupWeeks(body?.cupWeeks);
+  const scoringConfig = normalizeScoringConfig(body?.scoringConfig);
 
-  await query(
-    `INSERT INTO leagues (platform, slug, display_name, sleeper_league_id)
-     VALUES ('sleeper', ?, ?, ?)
-     ON CONFLICT(slug) DO UPDATE SET
-        display_name = excluded.display_name,
-        sleeper_league_id = excluded.sleeper_league_id`,
-    [slug, displayName, sleeperLeagueId]
-  );
+  await upsertLeague({ platform: "sleeper", slug, displayName, sleeperLeagueId, cupWeeks, scoringConfig });
 
-  return Response.json({ slug, displayName: displayName || slug });
+  return Response.json({ slug, displayName: displayName || slug, cupWeeks, scoringConfig });
 }
 
 async function handleEspn(body) {
@@ -168,20 +213,24 @@ async function handleEspn(body) {
   const displayName = requestedDisplayName || espnLeagueName || null;
   const baseSlug = slugify(displayName || `espn-${espnLeagueId}`) || `espn-${espnLeagueId}`;
   const slug = await reserveSlug(baseSlug, (row) => String(row.espn_league_id) === espnLeagueId);
+  const cupWeeks = normalizeCupWeeks(body?.cupWeeks);
+  const scoringConfig = normalizeScoringConfig(body?.scoringConfig);
 
-  await query(
-    `INSERT INTO leagues (platform, slug, display_name, espn_league_id, espn_s2, espn_swid, pull_years)
-     VALUES ('espn', ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(slug) DO UPDATE SET
-        display_name = excluded.display_name,
-        espn_league_id = excluded.espn_league_id,
-        espn_s2 = excluded.espn_s2,
-        espn_swid = excluded.espn_swid,
-        pull_years = excluded.pull_years`,
-    [slug, displayName, Number(espnLeagueId), espnS2 || null, espnSwid || null, JSON.stringify(pullYears)]
-  );
+  await upsertLeague({
+    platform: "espn",
+    slug,
+    displayName,
+    espnFields: {
+      espnLeagueId: Number(espnLeagueId),
+      espnS2: espnS2 || null,
+      espnSwid: espnSwid || null,
+      pullYearsJson: JSON.stringify(pullYears),
+    },
+    cupWeeks,
+    scoringConfig,
+  });
 
-  return Response.json({ slug, displayName: displayName || slug, years: pullYears });
+  return Response.json({ slug, displayName: displayName || slug, years: pullYears, cupWeeks, scoringConfig });
 }
 
 export async function POST(request) {
@@ -209,12 +258,41 @@ export async function POST(request) {
 // GET tells the form whether the ESPN path is even enabled on this
 // deployment, so it can hide/disable those fields instead of letting
 // someone fill out a form that can only ever 401. Also returns the current
-// league list, so the "Manage Leagues" section on the same page can list
-// rename/delete controls without a second round trip to /api/meta.
+// league list (including each one's Grand Prix defaults, so Manage
+// Leagues' "Edit Scoring" action can prefill the same picker the Add League
+// form uses), so the "Manage Leagues" section on the same page can list
+// rename/delete/edit-scoring controls without a second round trip to
+// /api/meta.
 export async function GET() {
-  const leagues = await query(
-    "SELECT slug, display_name AS displayName, platform FROM leagues ORDER BY slug"
-  ).catch(() => []); // tolerate a not-yet-migrated DB that lacks the leagues table
+  // Tries the full column list first; falls back to the pre-existing
+  // (narrower) SELECT if cup_weeks/scoring_config don't exist yet on this
+  // DB (see upsertLeague's comment above) -- a not-yet-migrated DB should
+  // still list leagues normally for rename/delete, just without scoring
+  // defaults to prefill, rather than breaking the whole Manage Leagues
+  // section outright.
+  let leagues = await query(
+    "SELECT slug, display_name AS displayName, platform, cup_weeks AS cupWeeks, scoring_config AS scoringConfigRaw FROM leagues ORDER BY slug"
+  ).catch(() => null);
+  if (leagues === null) {
+    leagues = await query("SELECT slug, display_name AS displayName, platform FROM leagues ORDER BY slug").catch(
+      () => [] // tolerate a not-yet-migrated DB that lacks the leagues table entirely
+    );
+  }
+  leagues = leagues.map((l) => {
+    let scoringConfig = null;
+    try {
+      scoringConfig = l.scoringConfigRaw ? JSON.parse(l.scoringConfigRaw) : null;
+    } catch {
+      scoringConfig = null;
+    }
+    return {
+      slug: l.slug,
+      displayName: l.displayName,
+      platform: l.platform,
+      cupWeeks: normalizeCupWeeks(l.cupWeeks),
+      scoringConfig,
+    };
+  });
 
   return Response.json({
     espnEnabled: Boolean(process.env.ADD_LEAGUE_PASSPHRASE),

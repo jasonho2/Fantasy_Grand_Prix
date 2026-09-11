@@ -2,8 +2,201 @@
 
 import { useEffect, useState } from "react";
 import { useJson } from "../../../lib/useJson";
+import PointsGrid from "../../components/PointsGrid";
+import { CUP_NAMES, DEFAULT_POINT_TABLES, DEFAULT_CUP_WEEKS } from "../../../lib/scoring";
 
-function SleeperForm({ onDone }) {
+// A blank (all-"") point-table draft sized for `mode` -- what a fresh
+// CupConfigBox starts with, and what it resets to on a mode switch (the two
+// modes have differently-sized placement tables, so carrying draft values
+// over from one to the other would leave stale/misaligned entries).
+function blankPointTable(mode) {
+  return DEFAULT_POINT_TABLES[mode].map(() => "");
+}
+
+function ModeSelect({ mode, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      <button
+        type="button"
+        className={`week-chip${mode === "solo" ? " selected" : ""}`}
+        onClick={() => onChange("solo")}
+      >
+        Solo
+      </button>
+      <button
+        type="button"
+        className={`week-chip${mode === "doubleDash" ? " selected" : ""}`}
+        onClick={() => onChange("doubleDash")}
+      >
+        Double Dash
+      </button>
+    </div>
+  );
+}
+
+// One cup's (or, in uniform mode, the whole league's) mode + point-table
+// configuration. `config` is { mode, pointTable } where pointTable is a
+// sparse array of strings the same length as DEFAULT_POINT_TABLES[mode] --
+// same shape PointSystemEditor uses on the Contests page (see
+// contests/page.js), just persisted server-side as a league default instead
+// of client-side as a personal override.
+function CupConfigBox({ title, config, onChange }) {
+  return (
+    <div className="panel" style={{ background: "var(--bg)", marginBottom: 12 }}>
+      {title && (
+        <strong style={{ display: "block", marginBottom: 8, fontSize: 14 }}>
+          {title}
+        </strong>
+      )}
+      <div style={{ marginBottom: 10 }}>
+        <ModeSelect
+          mode={config.mode}
+          onChange={(mode) => {
+            if (mode === config.mode) return;
+            onChange({ mode, pointTable: blankPointTable(mode) });
+          }}
+        />
+      </div>
+      <p style={{ fontSize: 12, color: "var(--text-dim)", margin: "0 0 8px" }}>
+        Points awarded for each weekly placement. Leave a box blank to keep the built-in default for
+        that placement.
+      </p>
+      <PointsGrid
+        defaults={DEFAULT_POINT_TABLES[config.mode]}
+        draft={config.pointTable}
+        onChange={(i, v) => {
+          const next = [...config.pointTable];
+          next[i] = v;
+          onChange({ ...config, pointTable: next });
+        }}
+      />
+    </div>
+  );
+}
+
+// The 15/16-week + scoring-format picker shown on the Add League form
+// (before the platform-specific fields' own "Add League" button) and reused
+// as-is for Manage Leagues' "Edit Scoring" action -- same controlled state
+// shape either way, just a different save target (register vs. PATCH).
+function GrandPrixSettings({
+  cupWeeks,
+  onCupWeeksChange,
+  uniform,
+  onUniformChange,
+  uniformConfig,
+  onUniformConfigChange,
+  perCupConfig,
+  onPerCupConfigChange,
+}) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ display: "block", fontSize: 13, marginBottom: 6 }}>Grand Prix length</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className={`week-chip${cupWeeks === 15 ? " selected" : ""}`}
+            onClick={() => onCupWeeksChange(15)}
+          >
+            15 weeks
+          </button>
+          <button
+            type="button"
+            className={`week-chip${cupWeeks === 16 ? " selected" : ""}`}
+            onClick={() => onCupWeeksChange(16)}
+          >
+            16 weeks
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ display: "block", fontSize: 13, marginBottom: 6 }}>Cup scoring format</label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={`week-chip${uniform ? " selected" : ""}`}
+            onClick={() => onUniformChange(true)}
+          >
+            Same for all 4 cups
+          </button>
+          <button
+            type="button"
+            className={`week-chip${!uniform ? " selected" : ""}`}
+            onClick={() => onUniformChange(false)}
+          >
+            Different per cup
+          </button>
+        </div>
+      </div>
+
+      {uniform ? (
+        <CupConfigBox config={uniformConfig} onChange={onUniformConfigChange} />
+      ) : (
+        CUP_NAMES.map((name, i) => (
+          <CupConfigBox
+            key={name}
+            title={name}
+            config={perCupConfig[i]}
+            onChange={(next) => {
+              const copy = [...perCupConfig];
+              copy[i] = next;
+              onPerCupConfigChange(copy);
+            }}
+          />
+        ))
+      )}
+
+      <p style={{ fontSize: 12, color: "var(--text-dim)", margin: "8px 0 0" }}>
+        These become the default scoring shown on the Grand Prix page for this league -- anyone
+        viewing can still switch modes, sort, or set their own personal point overrides, and
+        &quot;Reset to Default&quot; there brings it back to this.
+      </p>
+    </div>
+  );
+}
+
+// Packs the GrandPrixSettings widget's controlled state into the
+// scoringConfig JSON shape the server expects (see web/lib/scoring.js) --
+// mirrors normalizeScoringConfig's own cleanup (a fully-blank point table
+// collapses to null) so an all-defaults submission round-trips to exactly
+// what a league that never configured anything would already look like.
+function buildScoringConfig({ uniform, uniformConfig, perCupConfig }) {
+  function clean(config) {
+    const hasAny = config.pointTable.some((v) => v !== "" && v != null);
+    return { mode: config.mode, pointTable: hasAny ? config.pointTable : null };
+  }
+  return uniform
+    ? { uniform: true, ...clean(uniformConfig) }
+    : { uniform: false, cups: perCupConfig.map(clean) };
+}
+
+// The reverse of buildScoringConfig -- turns a stored (or absent) league
+// scoringConfig back into GrandPrixSettings' controlled state, e.g. when
+// Manage Leagues' "Edit Scoring" opens for a league that already has
+// defaults set. A stored pointTable entry is `number | null`; drafts want
+// strings (blank for null) since they're controlled <input> values.
+function scoringConfigToState(scoringConfig, cupWeeksValue) {
+  function toDraft(cfg) {
+    const mode = cfg?.mode === "doubleDash" ? "doubleDash" : "solo";
+    const stored = Array.isArray(cfg?.pointTable) ? cfg.pointTable : null;
+    const pointTable = DEFAULT_POINT_TABLES[mode].map((_, i) => {
+      const v = stored?.[i];
+      return v === null || v === undefined ? "" : String(v);
+    });
+    return { mode, pointTable };
+  }
+
+  const uniform = scoringConfig?.uniform !== false;
+  return {
+    cupWeeks: cupWeeksValue === 15 ? 15 : DEFAULT_CUP_WEEKS,
+    uniform,
+    uniformConfig: uniform ? toDraft(scoringConfig) : toDraft(null),
+    perCupConfig: CUP_NAMES.map((_, i) => toDraft(!uniform ? scoringConfig?.cups?.[i] : null)),
+  };
+}
+
+function SleeperForm({ onDone, cupWeeks, scoringConfig }) {
   const [sleeperLeagueId, setSleeperLeagueId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [status, setStatus] = useState("idle"); // idle | submitting | error
@@ -21,6 +214,8 @@ function SleeperForm({ onDone }) {
           platform: "sleeper",
           sleeperLeagueId: sleeperLeagueId.trim(),
           displayName: displayName.trim(),
+          cupWeeks,
+          scoringConfig,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -82,7 +277,7 @@ function SleeperForm({ onDone }) {
   );
 }
 
-function EspnForm({ onDone }) {
+function EspnForm({ onDone, cupWeeks, scoringConfig }) {
   const [espnLeagueId, setEspnLeagueId] = useState("");
   const [espnS2, setEspnS2] = useState("");
   const [espnSwid, setEspnSwid] = useState("");
@@ -108,6 +303,8 @@ function EspnForm({ onDone }) {
           years: years.trim(),
           displayName: displayName.trim(),
           passphrase,
+          cupWeeks,
+          scoringConfig,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -317,8 +514,62 @@ function DeleteForm({ league, onDone, onCancel }) {
   );
 }
 
+// Edits a registered league's Grand Prix defaults -- the same
+// GrandPrixSettings picker the Add League form uses, prefilled from
+// whatever this league already has stored (scoringConfigToState), saving
+// via PATCH instead of registering a new league. Lets a league that
+// predates this feature (or whose owner skipped it at import time) get real
+// defaults set for the first time, and lets them be changed again later.
+function EditScoringForm({ league, onDone, onCancel }) {
+  const [state, setState] = useState(() => scoringConfigToState(league.scoringConfig, league.cupWeeks));
+  const [status, setStatus] = useState("idle");
+  const [error, setError] = useState(null);
+
+  async function handleSave() {
+    setStatus("submitting");
+    setError(null);
+    try {
+      const res = await fetch(`/api/leagues/${encodeURIComponent(league.slug)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cupWeeks: state.cupWeeks, scoringConfig: buildScoringConfig(state) }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+      onDone(body);
+    } catch (err) {
+      setError(err.message);
+      setStatus("error");
+    }
+  }
+
+  return (
+    <div>
+      <GrandPrixSettings
+        cupWeeks={state.cupWeeks}
+        onCupWeeksChange={(cupWeeks) => setState((s) => ({ ...s, cupWeeks }))}
+        uniform={state.uniform}
+        onUniformChange={(uniform) => setState((s) => ({ ...s, uniform }))}
+        uniformConfig={state.uniformConfig}
+        onUniformConfigChange={(uniformConfig) => setState((s) => ({ ...s, uniformConfig }))}
+        perCupConfig={state.perCupConfig}
+        onPerCupConfigChange={(perCupConfig) => setState((s) => ({ ...s, perCupConfig }))}
+      />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button type="button" className="week-chip selected" onClick={handleSave} disabled={status === "submitting"}>
+          {status === "submitting" ? "Saving..." : "Save"}
+        </button>
+        <button type="button" className="week-chip" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+      {error && <div className="error-state" style={{ marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
 function ManageLeagues({ leagues, deleteEnabled, onChanged }) {
-  const [editingSlug, setEditingSlug] = useState(null); // "<slug>:rename" | "<slug>:delete" | null
+  const [editingSlug, setEditingSlug] = useState(null); // "<slug>:rename" | "<slug>:delete" | "<slug>:scoring" | null
 
   if (!leagues || leagues.length === 0) return null;
 
@@ -327,7 +578,14 @@ function ManageLeagues({ leagues, deleteEnabled, onChanged }) {
       <h2>Manage Leagues</h2>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {leagues.map((league) => {
-          const editing = editingSlug === `${league.slug}:rename` ? "rename" : editingSlug === `${league.slug}:delete` ? "delete" : null;
+          const editing =
+            editingSlug === `${league.slug}:rename`
+              ? "rename"
+              : editingSlug === `${league.slug}:delete`
+                ? "delete"
+                : editingSlug === `${league.slug}:scoring`
+                  ? "scoring"
+                  : null;
           return (
             <div key={league.slug} style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
               {editing === "rename" ? (
@@ -348,15 +606,27 @@ function ManageLeagues({ leagues, deleteEnabled, onChanged }) {
                     onChanged();
                   }}
                 />
+              ) : editing === "scoring" ? (
+                <EditScoringForm
+                  league={league}
+                  onCancel={() => setEditingSlug(null)}
+                  onDone={() => {
+                    setEditingSlug(null);
+                    onChanged();
+                  }}
+                />
               ) : (
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <div>
                     <strong>{league.displayName || league.slug}</strong>{" "}
                     <span style={{ color: "var(--text-dim)", fontSize: 12 }}>({league.platform})</span>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button type="button" className="week-chip" onClick={() => setEditingSlug(`${league.slug}:rename`)}>
                       Rename
+                    </button>
+                    <button type="button" className="week-chip" onClick={() => setEditingSlug(`${league.slug}:scoring`)}>
+                      Edit Scoring
                     </button>
                     <button
                       type="button"
@@ -382,6 +652,18 @@ export default function AddLeaguePage() {
   const { data: config, refetch } = useJson("/api/leagues");
   const [platform, setPlatform] = useState("sleeper");
   const [result, setResult] = useState(null);
+
+  // Grand Prix settings state, shared across both platform forms (only one
+  // is visible at a time, but there's no reason switching Sleeper/ESPN
+  // should discard what's already been picked here) -- see GrandPrixSettings
+  // and buildScoringConfig above.
+  const [cupWeeks, setCupWeeks] = useState(DEFAULT_CUP_WEEKS);
+  const [uniform, setUniform] = useState(true);
+  const [uniformConfig, setUniformConfig] = useState({ mode: "solo", pointTable: blankPointTable("solo") });
+  const [perCupConfig, setPerCupConfig] = useState(() =>
+    CUP_NAMES.map(() => ({ mode: "solo", pointTable: blankPointTable("solo") }))
+  );
+  const scoringConfig = buildScoringConfig({ uniform, uniformConfig, perCupConfig });
 
   // Once we know whether ESPN self-service is enabled on this deployment,
   // don't leave the tab sitting on a form that can only ever 401.
@@ -436,7 +718,26 @@ export default function AddLeaguePage() {
           </button>
         </div>
 
-        {platform === "sleeper" ? <SleeperForm onDone={setResult} /> : <EspnForm onDone={setResult} />}
+        {/* Grand Prix length + scoring format, chosen before either
+            platform's own "Add League" submit button -- per spec, these
+            apply regardless of which platform the league is being
+            registered on. */}
+        <GrandPrixSettings
+          cupWeeks={cupWeeks}
+          onCupWeeksChange={setCupWeeks}
+          uniform={uniform}
+          onUniformChange={setUniform}
+          uniformConfig={uniformConfig}
+          onUniformConfigChange={setUniformConfig}
+          perCupConfig={perCupConfig}
+          onPerCupConfigChange={setPerCupConfig}
+        />
+
+        {platform === "sleeper" ? (
+          <SleeperForm onDone={setResult} cupWeeks={cupWeeks} scoringConfig={scoringConfig} />
+        ) : (
+          <EspnForm onDone={setResult} cupWeeks={cupWeeks} scoringConfig={scoringConfig} />
+        )}
       </div>
 
       <ManageLeagues leagues={config?.leagues} deleteEnabled={config?.deleteEnabled} onChanged={refetch} />
