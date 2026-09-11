@@ -19,7 +19,7 @@ import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/Ch
 import PointsGrid from "../components/PointsGrid";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
-import { pointsForRank } from "../../lib/scoring";
+import { pointsForRank, ordinal } from "../../lib/scoring";
 
 // Matches the palette used for the Standings/Players trend charts, for a
 // consistent look across the app's line charts.
@@ -28,6 +28,16 @@ const COLORS = [
   "#4dd4d4", "#ff9f5b", "#9fd35c", "#f06292", "#7986cb",
   "#a1887f", "#90a4ae",
 ];
+
+// One line per placement ("1st: 12", "2nd: 10", ...) for a hover tooltip --
+// `table` is a fully-resolved table (see resolvePointTable in
+// ../../lib/scoring), so every index already has a real number, never a
+// blank/override marker. Used on the scoring badge and the Mode toggle
+// buttons so hovering either shows the whole distribution, not just the
+// active mode's placement points.
+function pointDistributionTooltip(table) {
+  return table.map((pts, i) => `${ordinal(i + 1)}: ${pts}`).join("\n");
+}
 
 // A custom point table is a personal display preference, not shared server
 // state -- persisted client-side (localStorage), keyed per league+season+
@@ -400,9 +410,12 @@ function ContestPanel({ contest, league, season, logos }) {
   // This cup's league-configured default scoring, always shown regardless
   // of whichever mode the Mode toggle currently has selected -- tells a
   // viewer what "Reset to Default" above brings the view back to. Hovering
-  // /tapping the badge reveals the full placement table.
+  // /tapping the badge (or either Mode button below) reveals the full
+  // placement table for that mode.
   const defaultModeLabel = defaultMode === "doubleDash" ? "Double Dash" : "Solo";
   const defaultModeTable = contest.defaultPointTable[defaultMode];
+  const soloPointsTooltip = pointDistributionTooltip(contest.defaultPointTable.solo);
+  const doubleDashPointsTooltip = pointDistributionTooltip(contest.defaultPointTable.doubleDash);
 
   return (
     <div className="panel">
@@ -414,7 +427,7 @@ function ContestPanel({ contest, league, season, logos }) {
         )}
         {contest.name} (Weeks {contest.start_week}-{contest.end_week}){" "}
         <span className={`badge ${STATUS_BADGE_CLASS[contest.status]}`}>{STATUS_LABEL[contest.status]}</span>
-        <span className="badge scoring" title={`Weekly placement points: ${defaultModeTable.join("-")}`}>
+        <span className="badge scoring" title={`Weekly placement points\n${pointDistributionTooltip(defaultModeTable)}`}>
           {defaultModeLabel}
         </span>
       </h2>
@@ -450,6 +463,7 @@ function ContestPanel({ contest, league, season, logos }) {
             type="button"
             className={`week-chip${mode === "solo" ? " selected" : ""}`}
             onClick={() => setMode("solo")}
+            title={`Weekly placement points\n${soloPointsTooltip}`}
           >
             Solo
           </button>
@@ -457,7 +471,7 @@ function ContestPanel({ contest, league, season, logos }) {
             type="button"
             className={`week-chip${mode === "doubleDash" ? " selected" : ""}`}
             onClick={() => setMode("doubleDash")}
-            title="This week's actual matchup pairs combine scores and get ranked as a pair -- both teammates score the same placement points."
+            title={`This week's actual matchup pairs combine scores and get ranked as a pair -- both teammates score the same placement points.\n\nWeekly placement points\n${doubleDashPointsTooltip}`}
           >
             Double Dash
           </button>
