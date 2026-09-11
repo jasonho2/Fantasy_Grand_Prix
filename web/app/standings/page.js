@@ -149,6 +149,27 @@ function TrendChart({
 
   const visibleTeams = selectedTeam ? teams.filter((t) => t === selectedTeam) : teams;
 
+  // The end-of-line team logo (see ChartTeamLogoDot) is centered on its
+  // team's last plotted value -- if that value sits right at the axis's
+  // auto-fit max, the logo's top half pokes past the plot area and gets
+  // clipped. Padding the axis ceiling 15% above the highest value actually
+  // being drawn (only visibleTeams, not every team, so isolating one team
+  // doesn't reserve headroom for a higher-scoring team that isn't even
+  // shown) gives every logo room to sit fully inside the chart regardless
+  // of which team currently has the top line. Falls back to Recharts' own
+  // auto domain when there's no positive data yet (empty/all-null range),
+  // rather than forcing a degenerate [0, 0] domain.
+  const yAxisMax = useMemo(() => {
+    let max = 0;
+    for (const row of rows) {
+      for (const team of visibleTeams) {
+        const v = row[team];
+        if (typeof v === "number" && v > max) max = v;
+      }
+    }
+    return max > 0 ? Math.ceil(max * 1.15) : null;
+  }, [rows, visibleTeams]);
+
   // Built from the full team list, not just currently-rendered lines, so
   // every team stays clickable in the legend even while narrowed to one.
   const legendPayload = teams.map((team, i) => ({
@@ -206,6 +227,7 @@ function TrendChart({
             />
             <YAxis
               stroke="#9aa1ad"
+              domain={yAxisMax != null ? [0, yAxisMax] : ["auto", "auto"]}
               label={
                 yAxisLabel ? { value: yAxisLabel, angle: -90, position: "insideLeft", fill: "#9aa1ad" } : undefined
               }
