@@ -588,6 +588,19 @@ th {
   user-select: none;
 }
 
+/* A cup leaderboard's week columns (see contests/page.js) -- clicking/
+   tapping one sorts the table by that week's placement points instead of
+   the season-to-date total. .sorted marks whichever one is currently
+   active, matching the accent color the Sort by/Mode toggle buttons above
+   the table already use for their own "selected" state. */
+.sortable-th:hover {
+  color: var(--text);
+}
+.sortable-th.sorted {
+  color: var(--accent);
+  font-weight: 700;
+}
+
 tr:hover td {
   background: var(--row-hover);
 }

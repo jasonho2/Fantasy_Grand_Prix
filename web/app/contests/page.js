@@ -39,6 +39,33 @@ function pointDistributionTooltip(table) {
   return table.map((pts, i) => `${ordinal(i + 1)}: ${pts}`).join("\n");
 }
 
+// Prefix for a per-week sort key, e.g. "week-2" sorts by contest.weeks[2] /
+// row.weekly_points[2] -- distinguishes it from the two column-level sort
+// keys ("contest_points", "fantasy_points") which index straight into a
+// leaderboard row instead of into its weekly_points array.
+const WEEK_SORT_PREFIX = "week-";
+
+function weekSortKey(weekIndex) {
+  return `${WEEK_SORT_PREFIX}${weekIndex}`;
+}
+
+// The value sortedLeaderboard below sorts by, for one row under whichever
+// `sortBy` is currently active -- either a leaderboard-level total
+// (contest_points/fantasy_points) or one specific week's placement points
+// (weekly_points[i], already reflecting a viewer's custom scoring override
+// if one is active -- see effectiveLeaderboard). A bye/unplayed week is
+// null, not 0; sorting by that week should still put those teams last
+// (descending sort, so the lowest value sorts to the bottom) rather than
+// tied with a team that actually scored 0 that week.
+function sortValueFor(row, sortBy) {
+  if (typeof sortBy === "string" && sortBy.startsWith(WEEK_SORT_PREFIX)) {
+    const weekIndex = Number(sortBy.slice(WEEK_SORT_PREFIX.length));
+    const points = row.weekly_points[weekIndex];
+    return points == null ? -Infinity : points;
+  }
+  return row[sortBy];
+}
+
 // A custom point table is a personal display preference, not shared server
 // state -- persisted client-side (localStorage), keyed per league+season+
 // cup+mode so switching any of those never bleeds one table's overrides
@@ -367,7 +394,7 @@ function ContestPanel({ contest, league, season, logos }) {
   }, [modeLeaderboard, contest.weeks, customPointTable, defaultPointTable]);
 
   const sortedLeaderboard = useMemo(() => {
-    const rows = [...effectiveLeaderboard].sort((a, b) => b[sortBy] - a[sortBy]);
+    const rows = [...effectiveLeaderboard].sort((a, b) => sortValueFor(b, sortBy) - sortValueFor(a, sortBy));
     return rows.map((row, i) => ({ ...row, displayRank: i + 1 }));
   }, [effectiveLeaderboard, sortBy]);
 
@@ -616,16 +643,35 @@ function ContestPanel({ contest, league, season, logos }) {
                     screen readers despite the empty visual header. */}
                 <th aria-label="Rank" />
                 <th className="sticky-col">Team</th>
-                {contest.weeks.map((wk) => (
-                  <th key={wk} title={wk === contest.liveWeek ? "Game in progress -- scores still updating" : undefined}>
-                    Wk {wk}
-                    {wk === contest.liveWeek && (
-                      <span className="badge tie" style={{ marginLeft: 4 }}>
-                        LIVE
-                      </span>
-                    )}
-                  </th>
-                ))}
+                {/* Clicking/tapping a week column sorts the table by that
+                    week's placement points (see sortValueFor above) --
+                    same descending-only behavior as the Sort by toggle
+                    above the table, just scoped to one week instead of the
+                    season-to-date total. aria-sort marks the active column
+                    for assistive tech; there's no ascending state to cycle
+                    through (per spec, sorting here is always descending). */}
+                {contest.weeks.map((wk, i) => {
+                  const thisWeekSortKey = weekSortKey(i);
+                  const isSorted = sortBy === thisWeekSortKey;
+                  const liveNote =
+                    wk === contest.liveWeek ? "Game in progress -- scores still updating. " : "";
+                  return (
+                    <th
+                      key={wk}
+                      onClick={() => setSortBy(thisWeekSortKey)}
+                      className={`sortable-th${isSorted ? " sorted" : ""}`}
+                      aria-sort={isSorted ? "descending" : undefined}
+                      title={`${liveNote}Click/tap to sort by this week's points.`}
+                    >
+                      Wk {wk}
+                      {wk === contest.liveWeek && (
+                        <span className="badge tie" style={{ marginLeft: 4 }}>
+                          LIVE
+                        </span>
+                      )}
+                    </th>
+                  );
+                })}
                 <th>Total</th>
                 <th title="Fantasy Points (ref)">PF</th>
               </tr>
