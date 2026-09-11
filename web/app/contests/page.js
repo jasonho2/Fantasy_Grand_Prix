@@ -291,22 +291,25 @@ function ContestPanel({ contest, league, season, logos }) {
     league && season ? `contest-points:${league}:${season}:${contest.name}:${mode}` : null;
   const [customPointTable, saveCustomPointTable] = useCustomPointTable(pointsKey);
 
-  // Already showing exactly what the league configured -- right mode, no
-  // personal override -- so there'd be nothing for "Reset to Default" to
-  // do. Used to disable that button rather than let it be a no-op click.
-  const isAtDefault = mode === defaultMode && !customPointTable;
+  // Already showing exactly what the league configured, plus the plain
+  // "Total" sort and table view every cup opens on -- so there'd be
+  // nothing for "Reset to Default" to do. Used to disable that button
+  // rather than let it be a no-op click.
+  const isAtDefault =
+    mode === defaultMode && !customPointTable && sortBy === "contest_points" && view === "table";
 
-  // Restores this cup's display to exactly what the league's Grand Prix
-  // settings configured: both the mode (Solo vs Double Dash) and that
-  // mode's scoring, undoing any personal point-table override. A personal
-  // override is stored per mode (see pointsKey above), so if the viewer
-  // switched to a non-default mode and customized *that* mode's points,
-  // merely clearing "whichever override is active right now" wouldn't
-  // switch the toggle back, and wouldn't touch a stray override already
-  // sitting in the default mode's own storage slot from an earlier visit --
-  // clearing that slot directly (rather than through saveCustomPointTable,
-  // which only ever targets the currently-selected mode's slot) handles
-  // both regardless of which mode is on screen when this is clicked.
+  // Restores this cup's entire display to how it looked before any of
+  // these were touched: the mode (Solo vs Double Dash), that mode's
+  // scoring (undoing any personal point-table override), the Sort by
+  // column, and the Table/Chart view. A personal override is stored per
+  // mode (see pointsKey above), so if the viewer switched to a non-default
+  // mode and customized *that* mode's points, merely clearing "whichever
+  // override is active right now" wouldn't switch the toggle back, and
+  // wouldn't touch a stray override already sitting in the default mode's
+  // own storage slot from an earlier visit -- clearing that slot directly
+  // (rather than through saveCustomPointTable, which only ever targets the
+  // currently-selected mode's slot) handles both regardless of which mode
+  // is on screen when this is clicked.
   function resetToDefault() {
     if (league && season) {
       const defaultKey = `contest-points:${league}:${season}:${contest.name}:${defaultMode}`;
@@ -321,6 +324,8 @@ function ContestPanel({ contest, league, season, logos }) {
     } else {
       setMode(defaultMode);
     }
+    setSortBy("contest_points");
+    setView("table");
     setEditingPoints(false);
   }
 
