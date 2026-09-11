@@ -283,6 +283,24 @@ function ContestPanel({ contest, league, season, logos }) {
   // chart, clears it back to showing everyone.
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [editingPoints, setEditingPoints] = useState(false);
+  // The scoring badge's `title` attribute shows the point distribution on
+  // desktop hover, but touch devices have no hover state -- a tap just
+  // fires a click with no way to see a native title tooltip first. This
+  // mirrors that same content in a tap-to-open popover instead: tapping the
+  // badge toggles it open, and a document-wide click closes it again
+  // (see the effect below), so tapping anywhere else -- another badge, the
+  // Mode buttons, the table -- dismisses it the same way a real tooltip
+  // would on mouseout.
+  const [scoringTooltipOpen, setScoringTooltipOpen] = useState(false);
+
+  useEffect(() => {
+    if (!scoringTooltipOpen) return undefined;
+    function closeTooltip() {
+      setScoringTooltipOpen(false);
+    }
+    document.addEventListener("click", closeTooltip);
+    return () => document.removeEventListener("click", closeTooltip);
+  }, [scoringTooltipOpen]);
 
   const modeLeaderboard = mode === "solo" ? contest.leaderboard : contest.doubleDashLeaderboard;
   // This cup's league-configured default table for the active mode (already
@@ -427,8 +445,52 @@ function ContestPanel({ contest, league, season, logos }) {
         )}
         {contest.name} (Weeks {contest.start_week}-{contest.end_week}){" "}
         <span className={`badge ${STATUS_BADGE_CLASS[contest.status]}`}>{STATUS_LABEL[contest.status]}</span>
-        <span className="badge scoring" title={`Weekly placement points\n${pointDistributionTooltip(defaultModeTable)}`}>
+        <span
+          className="badge scoring"
+          style={{ position: "relative" }}
+          title={`Weekly placement points\n${pointDistributionTooltip(defaultModeTable)}`}
+          onClick={(e) => {
+            // Stops this same click from immediately reaching the
+            // document-level listener that closes an already-open
+            // tooltip -- without it, opening one would also instantly
+            // close it in the same tap.
+            e.stopPropagation();
+            setScoringTooltipOpen((v) => !v);
+          }}
+        >
           {defaultModeLabel}
+          {scoringTooltipOpen && (
+            <span
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                marginTop: 6,
+                background: "var(--panel)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                padding: "8px 12px",
+                fontSize: 12,
+                fontWeight: 400,
+                textTransform: "none",
+                letterSpacing: "normal",
+                color: "var(--text)",
+                whiteSpace: "nowrap",
+                textAlign: "left",
+                boxShadow: "0 6px 16px rgba(0,0,0,0.3)",
+                zIndex: 20,
+                cursor: "default",
+              }}
+            >
+              <strong style={{ display: "block", marginBottom: 4 }}>Weekly placement points</strong>
+              {defaultModeTable.map((pts, i) => (
+                <div key={i}>
+                  {ordinal(i + 1)}: {pts}
+                </div>
+              ))}
+            </span>
+          )}
         </span>
       </h2>
 
