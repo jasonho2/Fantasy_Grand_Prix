@@ -252,14 +252,19 @@ function RankDelta({ delta }) {
 }
 
 function ContestPanel({ contest, league, season, logos }) {
+  // This cup's league-configured default mode (see api/contests/route.js's
+  // defaultModeForCup) -- what the Mode toggle opens on, and what "Reset to
+  // Default" switches back to regardless of whichever mode is currently
+  // selected.
+  const defaultMode = contest.defaultMode === "doubleDash" ? "doubleDash" : "solo";
+
   // Which ranking to show: Solo (each team ranked individually every week)
   // or Double Dash (that week's real head-to-head matchup pairs combine
   // scores and get ranked as a pair -- see the contests API route for the
   // full scoring rules). Independent of the Sort by toggle below, which
   // only changes display order within whichever mode is selected. Opens on
-  // this cup's league-configured default mode (contest.defaultMode) rather
-  // than always Solo -- see api/contests/route.js's defaultModeForCup.
-  const [mode, setMode] = useState(() => (contest.defaultMode === "doubleDash" ? "doubleDash" : "solo"));
+  // this cup's league-configured default mode rather than always Solo.
+  const [mode, setMode] = useState(defaultMode);
   // Descending only, per spec -- just which column, not direction.
   const [sortBy, setSortBy] = useState("contest_points");
   const [view, setView] = useState("table");
@@ -285,6 +290,39 @@ function ContestPanel({ contest, league, season, logos }) {
   const pointsKey =
     league && season ? `contest-points:${league}:${season}:${contest.name}:${mode}` : null;
   const [customPointTable, saveCustomPointTable] = useCustomPointTable(pointsKey);
+
+  // Already showing exactly what the league configured -- right mode, no
+  // personal override -- so there'd be nothing for "Reset to Default" to
+  // do. Used to disable that button rather than let it be a no-op click.
+  const isAtDefault = mode === defaultMode && !customPointTable;
+
+  // Restores this cup's display to exactly what the league's Grand Prix
+  // settings configured: both the mode (Solo vs Double Dash) and that
+  // mode's scoring, undoing any personal point-table override. A personal
+  // override is stored per mode (see pointsKey above), so if the viewer
+  // switched to a non-default mode and customized *that* mode's points,
+  // merely clearing "whichever override is active right now" wouldn't
+  // switch the toggle back, and wouldn't touch a stray override already
+  // sitting in the default mode's own storage slot from an earlier visit --
+  // clearing that slot directly (rather than through saveCustomPointTable,
+  // which only ever targets the currently-selected mode's slot) handles
+  // both regardless of which mode is on screen when this is clicked.
+  function resetToDefault() {
+    if (league && season) {
+      const defaultKey = `contest-points:${league}:${season}:${contest.name}:${defaultMode}`;
+      try {
+        window.localStorage.removeItem(defaultKey);
+      } catch {
+        // localStorage unavailable -- nothing was going to be there to clear anyway.
+      }
+    }
+    if (mode === defaultMode) {
+      saveCustomPointTable(null);
+    } else {
+      setMode(defaultMode);
+    }
+    setEditingPoints(false);
+  }
 
   // Everything below reads from effectiveLeaderboard, not modeLeaderboard
   // directly, so a custom point table (when set) flows through the sort
@@ -356,12 +394,10 @@ function ContestPanel({ contest, league, season, logos }) {
   const Icon = CUP_ICONS[contest.name];
   // This cup's league-configured default scoring, always shown regardless
   // of whichever mode the Mode toggle currently has selected -- tells a
-  // viewer what the "official" scoring is for this cup, and what "Reset to
-  // Default" in the point-system editor above brings a personal override
-  // back to. Hovering/tapping the badge reveals the full placement table.
-  const defaultModeLabel = contest.defaultMode === "doubleDash" ? "Double Dash" : "Solo";
-  const defaultModeTable =
-    contest.defaultMode === "doubleDash" ? contest.defaultPointTable.doubleDash : contest.defaultPointTable.solo;
+  // viewer what "Reset to Default" above brings the view back to. Hovering
+  // /tapping the badge reveals the full placement table.
+  const defaultModeLabel = defaultMode === "doubleDash" ? "Double Dash" : "Solo";
+  const defaultModeTable = contest.defaultPointTable[defaultMode];
 
   return (
     <div className="panel">
@@ -444,17 +480,18 @@ function ContestPanel({ contest, league, season, logos }) {
           above -- reopening it after switching Solo/Double Dash shows that
           mode's own (possibly different) overrides, per spec: point entry
           comes after the mode choice, not alongside it. A one-click "Reset
-          to Default" sits to its left, always visible (disabled when
-          there's no personal override to clear) so getting back to this
-          cup's league-configured default doesn't require opening the
-          editor first. */}
+          to Default" sits to its left, always visible (disabled once the
+          view already matches the league's configured default) -- clicking
+          it switches Mode back to this cup's default and clears any
+          personal point override, in one step, without opening the editor
+          first. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <button
           type="button"
           className="week-chip"
-          onClick={() => saveCustomPointTable(null)}
-          disabled={!customPointTable}
-          title={!customPointTable ? "No personal point overrides to reset -- already showing the league default" : undefined}
+          onClick={resetToDefault}
+          disabled={isAtDefault}
+          title={isAtDefault ? "Already showing the league default" : undefined}
         >
           Reset to Default
         </button>
