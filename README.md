@@ -168,14 +168,15 @@ workflow file to change either. You can also trigger a pull on demand any
 time from the repo's **Actions** tab -> "Pull fantasy data" -> **Run
 workflow**, no terminal needed.
 
-The frequent (every-5-minute) runs only re-pull each league's *current*
-season -- re-fetching an already-final season from a year or two ago on
-every single run added up to real minutes of wasted API calls for data
-that was never going to change. The once-daily run (and a manual "Run
-workflow" with its `full_pull` checkbox ticked) pulls every configured
-season instead, to catch the rare correction to an older season. See
-`pipeline.py`'s `--current-season-only` flag and the workflow file's own
-comments for the full reasoning.
+Every run -- every schedule, and a manual "Run workflow" -- only re-pulls
+each league's *current* season, never older ones. Re-fetching an
+already-final season from a year or two ago on every single run added up
+to real minutes of wasted API calls for data that was never going to
+change. There's currently no automated or on-demand way to re-pull an
+older season from this workflow; if that's ever needed, run `python
+pipeline.py --config config.json` locally without the `--current-season-
+only` flag (see `pipeline.py`'s docstring), or ask for a manual ad hoc
+option to be added to the workflow.
 
 ### Manual refresh from the site itself
 
@@ -395,10 +396,8 @@ and rerunning is all it takes to change a window's boundaries.
   (OneDrive/Dropbox/etc.), at the cost of crash-safety that doesn't matter
   for a periodically-rerun batch load.
 - If the GitHub repo is **private**, scheduled Actions runs count against a
-  monthly free-tier minutes cap (public repos don't have this limit). The
-  frequent (current-season-only) runs are quick; the once-daily full pull
-  and any manual full-pull run take longer -- one ESPN API call per played
-  week, per configured season -- so if you widen either schedule (more
-  often, more days, more seasons in `config.example.json`) and start
-  seeing runs skipped/queued, that's why -- either make the repo public or
-  trim the schedule.
+  monthly free-tier minutes cap (public repos don't have this limit). Every
+  run here is quick (current season only -- see above), but a manual local
+  `python pipeline.py --config config.json` run without
+  `--current-season-only` re-fetches every configured season (one ESPN API
+  call per played week, per season) and takes noticeably longer.
