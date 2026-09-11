@@ -1,6 +1,20 @@
+/* Dark is the default/fallback (matches the original design, and covers
+   browsers with no prefers-color-scheme support); the light override
+   below applies automatically when the OS/browser is set to light mode --
+   no JS, no user-facing toggle, just following the same signal
+   prefers-color-scheme already gives every other site. --panel-selected
+   and --row-hover exist because a couple of spots (Standings' selected-
+   row highlight, table row hover) need a value that isn't simply "the
+   dark or light version of an existing color" -- see their per-theme
+   values below. --accent/--win/--loss/--tie deliberately stay closer to
+   their dark-mode hues in light mode too (just deepened for contrast on
+   a white panel) rather than changing hue, so a color still means the
+   same thing in both themes. */
 :root {
+  color-scheme: dark;
   --bg: #0f1115;
   --panel: #171a21;
+  --panel-selected: #1f2a3c;
   --border: #2a2e37;
   --text: #e7e9ee;
   --text-dim: #9aa1ad;
@@ -8,6 +22,24 @@
   --win: #3ecf8e;
   --loss: #ff6b6b;
   --tie: #d9b64e;
+  --row-hover: rgba(255, 255, 255, 0.02);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --panel-selected: #e4edfc;
+    --border: #c7cbd3;
+    --text: #14161a;
+    --text-dim: #5b6169;
+    --accent: #5b9dff;
+    --win: #0f7a45;
+    --loss: #b02e2e;
+    --tie: #7d5f13;
+    --row-hover: rgba(0, 0, 0, 0.03);
+  }
 }
 
 * {
@@ -557,7 +589,7 @@ th {
 }
 
 tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--row-hover);
 }
 
 .badge {

@@ -25,7 +25,7 @@ export default function ChartTeamLogoDot({ cx, cy, src, size = 18, clipId }) {
         cy={cy}
         r={r}
         fill="var(--border)"
-        stroke="#0d0f14"
+        stroke="var(--bg)"
         strokeWidth={1}
       />
     );
@@ -45,7 +45,7 @@ export default function ChartTeamLogoDot({ cx, cy, src, size = 18, clipId }) {
         preserveAspectRatio="xMidYMid slice"
         clipPath={`url(#${clipId})`}
       />
-      <circle cx={ex} cy={cy} r={r} fill="none" stroke="#0d0f14" strokeWidth={1} />
+      <circle cx={ex} cy={cy} r={r} fill="none" stroke="var(--bg)" strokeWidth={1} />
     </g>
   );
 }

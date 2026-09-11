@@ -25,7 +25,7 @@ const POSITION_COLORS = {
   K: "#4dd4d4",
   "D/ST": "#ff6b6b",
 };
-const FALLBACK_COLOR = "#9aa1ad";
+const FALLBACK_COLOR = "var(--text-dim)";
 
 // Chart/legend stacking order (offense skill positions, then D/ST, then
 // K) rather than alphabetical. Any position not in this list (shouldn't
@@ -112,7 +112,7 @@ function TeamTick({ x, y, payload }) {
   const lineHeight = 13;
   const firstDy = -((lines.length - 1) * lineHeight) / 2;
   return (
-    <text x={x} y={y} textAnchor="end" fill="#9aa1ad" fontSize={11} dominantBaseline="central">
+    <text x={x} y={y} textAnchor="end" fill="var(--text-dim)" fontSize={11} dominantBaseline="central">
       {lines.map((line, i) => (
         <tspan key={i} x={x} dy={i === 0 ? firstDy : lineHeight}>
           {line}
@@ -305,18 +305,18 @@ function PlayersInner() {
                   layout="vertical"
                   margin={{ top: 24, right: 50, left: 0, bottom: 10 }}
                 >
-                  <CartesianGrid stroke="#2a2e37" horizontal={false} />
-                  <XAxis type="number" stroke="#9aa1ad" />
+                  <CartesianGrid stroke="var(--border)" horizontal={false} />
+                  <XAxis type="number" stroke="var(--text-dim)" />
                   <YAxis
                     dataKey="team"
                     type="category"
-                    stroke="#9aa1ad"
+                    stroke="var(--text-dim)"
                     width={yAxisWidth}
                     tickMargin={2}
                     tickLine={false}
                     tick={(props) => <TeamTick {...props} />}
                   />
-                  <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
+                  <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)" }} />
                   {/* Clicking a position in the legend sets the same
                       positionFilter state the dropdown below drives --
                       since both the chart's aggregation and the Player

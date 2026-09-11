@@ -567,17 +567,22 @@ function ContestPanel({ contest, league, season, logos }) {
                   team logo (see ChartTeamLogoDot), drawn just past the last
                   plotted point rather than on top of it. */}
               <LineChart data={chartData} margin={{ top: 10, right: 44, bottom: 10, left: 0 }}>
-                <CartesianGrid stroke="#2a2e37" />
+                <CartesianGrid stroke="var(--border)" />
                 <XAxis
                   dataKey="week"
-                  stroke="#9aa1ad"
-                  label={{ value: "Week", position: "insideBottom", offset: -5, fill: "#9aa1ad" }}
+                  stroke="var(--text-dim)"
+                  label={{ value: "Week", position: "insideBottom", offset: -5, fill: "var(--text-dim)" }}
                 />
                 <YAxis
-                  stroke="#9aa1ad"
-                  label={{ value: "Cumulative points", angle: -90, position: "insideLeft", fill: "#9aa1ad" }}
+                  stroke="var(--text-dim)"
+                  label={{
+                    value: "Cumulative points",
+                    angle: -90,
+                    position: "insideLeft",
+                    fill: "var(--text-dim)",
+                  }}
                 />
-                <Tooltip contentStyle={{ background: "#171a21", border: "1px solid #2a2e37" }} />
+                <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)" }} />
                 <Legend
                   payload={legendPayload}
                   onClick={(entry, index, event) => selectTeam(entry.value, event)}
