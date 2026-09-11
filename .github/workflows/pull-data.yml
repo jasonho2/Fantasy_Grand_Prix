@@ -7,9 +7,9 @@ name: Pull fantasy data
 # get picked up automatically on the next scheduled run -- there's no
 # separate "corrections" step.
 #
-# Schedule: every 5 minutes, but only on the NFL's primary game days
+# Schedule: every 5 minutes, but only on/around the NFL's primary game days
 # (Thu/Sun/Mon) to avoid burning Actions minutes the rest of the week.
-# Adjust the cron expression below, or just use "Run workflow" in the
+# Adjust the cron expressions below, or just use "Run workflow" in the
 # Actions tab for an on-demand pull any time.
 #
 # Every-5-minutes is specifically so the Matchups page's live in-progress
@@ -20,9 +20,24 @@ name: Pull fantasy data
 # GitHub's own scheduling is best-effort, not exact -- a run can slip by a
 # few minutes during periods of high platform load, so "every 5 minutes"
 # means "about every 5 minutes," not a hard guarantee.
+#
+# GitHub Actions cron is UTC, but this league runs on Pacific time (see
+# Nav.js's formatDataAsOf). A ~5:15pm PT Thursday/Monday night kickoff is
+# already past midnight UTC -- 00:15 UTC the *next* day (Fri/Tue) -- so
+# the entire TNF/MNF game (not just its tail end) falls on a UTC weekday
+# the day-of-week list below doesn't include, and the first cron entry
+# alone would stop refreshing right as those games kick off. Sunday
+# doesn't have this gap: Sunday Night Football's ~5:20pm PT kickoff is
+# 00:20 UTC *Monday*, which the first entry already covers via day 1.
+# The second cron entry below patches the TNF/MNF gap with a narrow
+# early-UTC-morning window on the following day (Fri/Tue) -- wide enough
+# (00:00-05:59 UTC) to cover a kickoff anywhere from PDT (UTC-7) to PST
+# (UTC-8, after the season's fall-back DST change) through a game running
+# long with overtime, without running all day on days with no game.
 on:
   schedule:
-    - cron: "*/5 * * * 0,1,4"
+    - cron: "*/5 * * * 0,1,4" # Sun/Mon/Thu, all day UTC
+    - cron: "*/5 0-5 * * 2,5" # early UTC hours Tue/Fri -- MNF/TNF spillover past UTC midnight
   workflow_dispatch: {}
 
 jobs:
