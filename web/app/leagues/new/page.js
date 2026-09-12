@@ -74,13 +74,14 @@ function CupConfigBox({ title, config, onChange }) {
   );
 }
 
-// Just the 15/16-week toggle -- league-wide (stored on `leagues`, doesn't
-// vary by season, see db.py), so it's shown once regardless of which
-// season a scoring editor might otherwise be scoped to. Split out from the
-// scoring-format picker below (they used to be one combined component)
-// specifically so Manage Leagues' per-season Edit Scoring can show this
-// once, outside the season picker, instead of implying cup length varies by
-// year the way scoring now does.
+// Just the 15/16-week toggle -- scoped per season now (stored on
+// `league_seasons`, see db.py's cup_weeks comment), same as scoring. Split
+// out from the scoring-format picker below (they used to be one combined
+// component, back when cup length actually was league-wide) purely to keep
+// each picker focused; both Add League's GrandPrixSettings (configuring
+// only ever "the initial season") and Manage Leagues' EditScoringForm
+// (reloading per whichever season its own dropdown has selected) compose
+// this the same way.
 function CupWeeksPicker({ cupWeeks, onChange }) {
   return (
     <div style={{ marginBottom: 14 }}>
@@ -222,8 +223,9 @@ function buildScoringConfig({ uniform, uniformConfig, perCupConfig }) {
 // defaults set, or when its season dropdown switches to a different season.
 // A stored pointTable entry is `number | null`; drafts want strings (blank
 // for null) since they're controlled <input> values. No cupWeeks in this
-// shape -- that's league-wide, not per-season, and tracked separately (see
-// CupWeeksPicker/EditScoringForm) rather than reloaded on every season switch.
+// shape -- that's tracked separately (see CupWeeksPicker/EditScoringForm),
+// which is why cupWeeks gets its own useState reloaded via
+// handleSeasonChange rather than being folded into this state object.
 function scoringConfigToState(scoringConfig) {
   function toDraft(cfg) {
     const mode = cfg?.mode === "doubleDash" ? "doubleDash" : "solo";
@@ -587,20 +589,24 @@ function DeleteForm({ league, onDone, onCancel }) {
   );
 }
 
-// Edits a registered league's Grand Prix defaults: CupWeeksPicker (always,
-// league-wide) plus a season dropdown (from league.seasons, defaulting to
-// the most recent) and ScoringFormatSettings scoped to whichever season is
-// selected, reloading its draft state from league.scoringConfigBySeason
-// whenever the selection changes -- scoring is configured per season now
-// (see db.py's league_seasons.scoring_config), so switching seasons here
-// must never carry over another season's unsaved edits. Saving always
-// requires the passphrase (see api/leagues/[slug]/route.js's PATCH comment
-// for why this hard-fails on a wrong one, unlike Add League's Sleeper path,
-// which soft-fails to keep registration open).
+// Edits a registered league's Grand Prix defaults: a season dropdown (from
+// league.seasons, defaulting to the most recent), plus CupWeeksPicker and
+// ScoringFormatSettings BOTH scoped to whichever season is selected,
+// reloading their draft state from league.cupWeeksBySeason/
+// scoringConfigBySeason whenever the selection changes -- cup length and
+// scoring are both configured per season now (see db.py's league_seasons.
+// cup_weeks/scoring_config), so switching seasons here must never carry
+// over another season's unsaved edits, and saving must never silently
+// change a different season's Contests page. Saving always requires the
+// passphrase (see api/leagues/[slug]/route.js's PATCH comment for why this
+// hard-fails on a wrong one, unlike Add League's Sleeper path, which
+// soft-fails to keep registration open).
 function EditScoringForm({ league, onDone, onCancel }) {
   const seasons = league.seasons || [];
   const [season, setSeason] = useState(() => (seasons.length ? seasons[seasons.length - 1] : null));
-  const [cupWeeks, setCupWeeks] = useState(() => normalizeCupWeeks(league.cupWeeks));
+  const [cupWeeks, setCupWeeks] = useState(() =>
+    normalizeCupWeeks(season != null ? league.cupWeeksBySeason?.[season] : null)
+  );
   const [state, setState] = useState(() =>
     scoringConfigToState(season != null ? league.scoringConfigBySeason?.[season] : null)
   );
@@ -610,6 +616,7 @@ function EditScoringForm({ league, onDone, onCancel }) {
 
   function handleSeasonChange(nextSeason) {
     setSeason(nextSeason);
+    setCupWeeks(normalizeCupWeeks(league.cupWeeksBySeason?.[nextSeason]));
     setState(scoringConfigToState(league.scoringConfigBySeason?.[nextSeason]));
   }
 
@@ -657,8 +664,10 @@ function EditScoringForm({ league, onDone, onCancel }) {
 
   return (
     <div>
-      <CupWeeksPicker cupWeeks={cupWeeks} onChange={setCupWeeks} />
-
+      {/* Season picked first -- both CupWeeksPicker and ScoringFormatSettings
+          below are scoped to whichever season this selects (see the
+          function-level comment), so picking the season up front makes that
+          scoping clear rather than implying either setting is global. */}
       <div style={{ marginBottom: 14 }}>
         <label htmlFor={`season-${league.slug}`} style={{ display: "block", fontSize: 13, marginBottom: 6 }}>
           Season
@@ -676,6 +685,8 @@ function EditScoringForm({ league, onDone, onCancel }) {
           ))}
         </select>
       </div>
+
+      <CupWeeksPicker cupWeeks={cupWeeks} onChange={setCupWeeks} />
 
       <ScoringFormatSettings
         uniform={state.uniform}

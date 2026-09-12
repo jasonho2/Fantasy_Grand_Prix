@@ -12,8 +12,9 @@ import {
 // not hardcoded here, since they can vary by league/season/commissioner.
 // Each cup's actual week boundaries, however, come from CUP_WEEK_SETS
 // below (positionally overriding whatever's in contest_windows), chosen by
-// this league's own configured cup_weeks setting (Manage Leagues'
-// CupWeeksPicker) -- see that constant's comment.
+// THIS SEASON's own configured cup_weeks setting (Manage Leagues'
+// CupWeeksPicker, scoped per season -- see league_seasons.cup_weeks in
+// db.py) -- see that constant's comment.
 //
 // Two scoring modes, both Mario-Kart-style weekly placement points that
 // accumulate cumulatively across a contest window's weeks (each week's
@@ -58,11 +59,13 @@ import {
 // of any point table) -- not currently consumed by the frontend, but cheap
 // to include and useful for spot-checking a cup's numbers.
 
-// The two supported Grand Prix cup lengths, selected by this league's own
-// configured cup_weeks setting (see leagueRows/normalizeCupWeeks below) --
-// independent of season, since the cup leaderboard is already computed
-// live from raw weekly scores per-request (nothing about a cup's standings
-// is precomputed or cached beyond its week boundaries), so a commissioner
+// The two supported Grand Prix cup lengths, selected by THIS SEASON's own
+// configured cup_weeks setting (see leagueRows/normalizeCupWeeks below,
+// and league_seasons.cup_weeks in db.py -- per-season, not league-wide, so
+// a league can switch structures for a future season without rewriting an
+// earlier one's), since the cup leaderboard is already computed live from
+// raw weekly scores per-request (nothing about a cup's standings is
+// precomputed or cached beyond its week boundaries), so a commissioner
 // changing this setting needs no pipeline re-run or database migration.
 //
 // "15" is the original 3/4/4/4-week split (Mushroom 1-3, Flower 4-7, Star
@@ -94,31 +97,34 @@ export async function GET(request) {
   if (!season || !league) {
     return Response.json({ error: "season and league query params are required" }, { status: 400 });
   }
-  // League-scoped row carrying the display name, this league's cup length
-  // (league-wide -- doesn't vary by season), and THIS season's scoring
-  // config (ls.scoring_config, not l.scoring_config -- see the file-level
-  // comment above). The join is already season-scoped (ls.season = ?), so
-  // pulling scoring_config off `ls` instead of `l` is what actually makes
-  // scoring per-season instead of per-league. Selecting cup_weeks/
-  // scoring_config here (rather than a separate query) means a
+  // League-scoped row carrying the display name, and THIS season's cup
+  // length and scoring config (ls.cup_weeks/ls.scoring_config, not
+  // l.cup_weeks/l.scoring_config -- see the file-level comment above and
+  // db.py's league_seasons.cup_weeks comment). The join is already
+  // season-scoped (ls.season = ?), so pulling both off `ls` instead of `l`
+  // is what actually makes cup length and scoring per-season instead of
+  // per-league -- a commissioner changing next season's structure can't
+  // silently change a past season's Contests page too. Selecting
+  // cup_weeks/scoring_config here (rather than a separate query) means a
   // not-yet-migrated DB -- one the Python pipeline hasn't reconnected to
   // since these columns were added -- fails this whole query and falls back
   // to [] below, same tolerate-missing pattern used elsewhere in this route
   // (see the live_matchups query).
   const leagueRows = await query(
-    `SELECT COALESCE(l.display_name, ls.league_name) AS name, l.cup_weeks AS cupWeeks, ls.scoring_config AS scoringConfigRaw
+    `SELECT COALESCE(l.display_name, ls.league_name) AS name, ls.cup_weeks AS cupWeeks, ls.scoring_config AS scoringConfigRaw
      FROM leagues l LEFT JOIN league_seasons ls ON ls.league_id = l.league_id AND ls.season = ?
      WHERE l.slug = ?`,
     [season, league]
   ).catch(() => []);
   const leagueName = leagueRows[0]?.name ?? null;
-  // Cup length is this league's own configured setting (Manage Leagues'
-  // CupWeeksPicker, see web/app/leagues/new/page.js) -- falls back to 16
-  // for a league that's never set one. This used to also accept a
-  // ?cupWeeks query param as a viewer-facing override; removed since the
-  // per-league setting made that redundant (and confusing -- a viewer's
-  // override could silently disagree with what the commissioner
-  // configured).
+  // Cup length is THIS SEASON's own configured setting (Manage Leagues'
+  // CupWeeksPicker, scoped to whichever season its own season dropdown has
+  // selected -- see web/app/leagues/new/page.js) -- falls back to 16 for a
+  // season that's never had one explicitly set. This used to be one
+  // league-wide setting (and, before that, also accepted a ?cupWeeks query
+  // param as a viewer-facing override); both were removed since a single
+  // value/override could silently disagree with, or overwrite, what a
+  // commissioner configured for a specific season.
   const cupWeeks = normalizeCupWeeks(leagueRows[0]?.cupWeeks);
   let scoringConfig = null;
   try {

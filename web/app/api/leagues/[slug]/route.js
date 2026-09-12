@@ -17,12 +17,14 @@ import { normalizeCupWeeks, normalizeScoringConfig } from "@/lib/scoring";
 // silently falls back to defaults" behavior, a wrong/missing passphrase
 // here hard-fails with 401, exactly like DELETE below. A request can
 // include the displayName field, the scoring field group, or both; the
-// scoring group requires `season` (which season's config this edits -- see
-// db.py's league_seasons.scoring_config for why scoring is per-season, not
-// per-league) plus `passphrase`, in addition to at least one of cupWeeks/
-// scoringConfig. cupWeeks/scoringConfig use the same shape/validation as
-// registration (see web/lib/scoring.js and api/leagues/route.js's
-// upsertLeague/upsertSeasonScoring) -- this is how a season's Grand Prix
+// scoring group requires `season` (which season this edits -- see db.py's
+// league_seasons.cup_weeks/scoring_config for why BOTH cup length and
+// scoring are per-season, not per-league: changing either for one season
+// must never silently change a different season's Contests page too) plus
+// `passphrase`, in addition to at least one of cupWeeks/scoringConfig.
+// cupWeeks/scoringConfig use the same shape/validation as registration
+// (see web/lib/scoring.js and api/leagues/route.js's
+// upsertLeague/upsertSeasonDefaults) -- this is how a season's Grand Prix
 // defaults get set for the first time, or changed later.
 //
 // Deleting is destructive and irreversible (every team/matchup/weekly
@@ -89,21 +91,22 @@ export async function PATCH(request, context) {
     if (hasScoring) {
       const cupWeeks = normalizeCupWeeks(body.cupWeeks);
       const scoringConfig = normalizeScoringConfig(body.scoringConfig);
-      // cup_weeks is league-wide (unchanged from before) -- still lives on
-      // `leagues`, still has no fallback here (unlike registration's
-      // upsertLeague): if this column doesn't exist yet on this DB,
-      // surfacing a real error is more useful than silently pretending the
-      // edit took effect.
-      await query("UPDATE leagues SET cup_weeks = ? WHERE slug = ?", [cupWeeks, slug]);
-      // scoringConfig, by contrast, is scoped to the specific `season` this
-      // request named -- upserted into league_seasons rather than written
-      // to leagues.scoring_config (superseded, see db.py), so editing one
-      // season's scoring never touches any other season's leaderboard.
+      // Both cup_weeks and scoringConfig are scoped to the specific
+      // `season` this request named -- upserted together into
+      // league_seasons (not written to leagues.cup_weeks/scoring_config,
+      // both superseded, see db.py) so editing one season's Grand Prix
+      // settings never touches any other season's Contests page. No
+      // fallback here (unlike registration's upsertLeague/
+      // upsertSeasonDefaults, which log-and-no-op on a not-yet-migrated
+      // DB): this is a deliberate, explicit edit action, so if either
+      // column doesn't exist yet on this DB, surfacing a real error is
+      // more useful than silently pretending the edit took effect.
       await query(
-        `INSERT INTO league_seasons (league_id, season, scoring_config)
-         VALUES ((SELECT league_id FROM leagues WHERE slug = ?), ?, ?)
-         ON CONFLICT(league_id, season) DO UPDATE SET scoring_config = excluded.scoring_config`,
-        [slug, season, JSON.stringify(scoringConfig)]
+        `INSERT INTO league_seasons (league_id, season, cup_weeks, scoring_config)
+         VALUES ((SELECT league_id FROM leagues WHERE slug = ?), ?, ?, ?)
+         ON CONFLICT(league_id, season) DO UPDATE SET
+              cup_weeks = excluded.cup_weeks, scoring_config = excluded.scoring_config`,
+        [slug, season, cupWeeks, JSON.stringify(scoringConfig)]
       );
       result.season = season;
       result.cupWeeks = cupWeeks;

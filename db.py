@@ -174,10 +174,13 @@ CREATE TABLE IF NOT EXISTS leagues (
                                           -- self-service ESPN leagues need an explicit year list from
                                           -- somewhere; config.json-defined leagues ignore this column
                                           -- entirely and use their own "years" list instead.
-    cup_weeks INTEGER,                    -- 15 or 16 -- this league's configured Grand Prix cup length,
-                                          -- used as the Contests page's default (still overridable live
-                                          -- via ?cupWeeks). NULL means "16, never explicitly configured."
-                                          -- League-wide, not per-season -- cup length doesn't vary by year.
+    cup_weeks INTEGER,                    -- SUPERSEDED by league_seasons.cup_weeks below -- cup length
+                                          -- used to be one league-wide setting, which turned out wrong
+                                          -- for the same reason leagues.scoring_config was retired (see
+                                          -- its comment just below): a commissioner changing it for one
+                                          -- season silently changed every other season's Contests page
+                                          -- too. Left in place harmlessly for any old row that still has
+                                          -- a value, but no application code reads or writes it anymore.
     scoring_config TEXT,                 -- SUPERSEDED by league_seasons.scoring_config below -- scoring is
                                           -- now configured per season, not once for the whole league (a
                                           -- league's point system can change year to year, and this
@@ -211,6 +214,15 @@ CREATE TABLE IF NOT EXISTS league_seasons (
                                           -- since a league's scoring can legitimately change year to year
                                           -- and each season's leaderboard must keep reflecting whatever
                                           -- was configured for that specific year.
+    cup_weeks INTEGER,                   -- 15 or 16 -- THIS season's configured Grand Prix cup length
+                                          -- (see api/contests/route.js's CUP_WEEK_SETS). NULL means "16,
+                                          -- never explicitly configured for this season." Supersedes
+                                          -- leagues.cup_weeks (see that column's comment) for exactly the
+                                          -- same reason scoring_config was moved here: cup length can
+                                          -- legitimately change year to year (e.g. a league switching from
+                                          -- the original 15-week split to the newer 16-week one starting a
+                                          -- given season), and a single league-wide value meant editing it
+                                          -- for one season silently changed every other season too.
     UNIQUE(league_id, season)
 );
 CREATE INDEX IF NOT EXISTS idx_league_seasons_league ON league_seasons(league_id);
@@ -430,14 +442,12 @@ COLUMN_MIGRATIONS = [
     # get_or_create_team(); NULL until the next pipeline run touches a
     # league sourced before this column existed.
     ("teams", "logo_url", "TEXT"),
-    # A league's configured Grand Prix defaults -- 15 vs 16 week cup
-    # structure, and the default placement->points scoring shown on the
-    # Contests page (see web/lib/scoring.js for the JSON shape/resolution
-    # rules). Set via the "Add a League" form or Manage Leagues' "Edit
-    # Scoring" action (web/app/api/leagues routes); NULL for any league
-    # that predates this feature or was never explicitly configured --
-    # api/contests/route.js treats NULL the same as "16 weeks, plain Solo,
-    # no point overrides."
+    # SUPERSEDED -- see the SCHEMA_SQL comment on leagues.cup_weeks and the
+    # league_seasons.cup_weeks entry just below. Kept here (rather than
+    # deleted) purely so a database that predates BOTH this column and the
+    # per-season one still gets leagues.cup_weeks added on connect, matching
+    # what SCHEMA_SQL declares -- no application code reads or writes it
+    # going forward.
     ("leagues", "cup_weeks", "INTEGER"),
     # SUPERSEDED -- see the SCHEMA_SQL comment on leagues.scoring_config and
     # the league_seasons.scoring_config entry just below. Kept here (rather
@@ -454,6 +464,13 @@ COLUMN_MIGRATIONS = [
     # too. NULL for any season never explicitly configured; api/contests/
     # route.js treats that the same as "plain Solo, no point overrides."
     ("league_seasons", "scoring_config", "TEXT"),
+    # Per-season Grand Prix cup length (see the SCHEMA_SQL comment on
+    # league_seasons.cup_weeks above). Replaces leagues.cup_weeks for the
+    # same reason scoring_config moved here -- one league-wide value meant
+    # changing it for one season silently changed every other season's
+    # Contests page too. NULL for any season never explicitly configured;
+    # api/contests/route.js treats that the same as "16 weeks."
+    ("league_seasons", "cup_weeks", "INTEGER"),
 ]
 
 
