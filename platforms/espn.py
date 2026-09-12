@@ -128,10 +128,48 @@ def _player_week_points(player, week, stat_source_id=0):
     return None
 
 
-def extract_player_rows(week_raw, year, week, team_manager, team_name, stat_source_id=0):
+def _blended_player_week_points(player, week):
+    """A player's actual score if their game has already been played (or
+    started) this week -- i.e. a statSourceId=0 entry exists for this
+    scoringPeriodId, even if its value is 0 (a played game that scored
+    nothing is still "played", not "hasn't happened yet") -- otherwise
+    their statSourceId=1 projection for the same week. Used ONLY to fill in
+    the live week's own contribution to "Projected Finish" (see
+    pull_season): "points already earned, plus this platform's own
+    projection for anyone who hasn't played yet" is exactly what a viewer
+    means by a live week's projected total, and it's also what ESPN's own
+    site shows as your team's "current" score during a live week -- a
+    blend, not pure actual. The real leaderboard's live-week totals
+    (live_matchup_records/live_player_rows in pull_season) deliberately
+    keep using plain actual points instead (via extract_player_rows'
+    default stat_source_id=0, no blending) -- only Projected Finish, via
+    projected_matchups, ever sees this blended number.
+
+    (An earlier version of this fix instead let extract_player_rows fall
+    back to a player's appliedStatTotal for a pure statSourceId=1 read on
+    FUTURE weeks, on the theory that many players were missing a dedicated
+    projection entry there. Comparing real numbers against ESPN's own
+    displayed projections showed that theory was wrong -- future-week
+    projections were already accurate -- and that fallback measurably
+    made a couple of players' numbers worse, so it's been reverted below.
+    The entire gap a user reported turned out to be the live week's
+    actual-vs-blended difference, which this function fixes instead.)
+    """
+    actual = _player_week_points(player, week, stat_source_id=0)
+    if actual is not None:
+        return actual
+    return _player_week_points(player, week, stat_source_id=1)
+
+
+def extract_player_rows(week_raw, year, week, team_manager, team_name, stat_source_id=0, points_fn=None):
     """Parse a single week's boxscore payload into one row per starting-lineup
     player (bench/IR excluded). `stat_source_id` selects actual (0, default)
-    vs. projected (1) points -- see _player_week_points."""
+    vs. projected (1) points -- see _player_week_points. `points_fn`, if
+    given, overrides stat_source_id entirely and is called as
+    points_fn(player, week) instead -- used for a blended actual-or-
+    projected read (see _blended_player_week_points) where a single
+    statSourceId can't express "prefer actual, fall back to projected."
+    """
     rows = []
     for m in week_raw.get("schedule", []):
         if m.get("matchupPeriodId") != week:
@@ -148,27 +186,17 @@ def extract_player_rows(week_raw, year, week, team_manager, team_name, stat_sour
                     continue  # not part of the starting lineup this week
 
                 player = entry.get("playerPoolEntry", {}).get("player", {})
-                points = _player_week_points(player, week, stat_source_id)
-                if points is None:
-                    # Fallback: appliedStatTotal reflects whatever ESPN
-                    # currently treats as "the" total for this roster entry
-                    # -- not every player has a specific statSourceId entry
-                    # in their `stats` array for every scoring period (ESPN
-                    # seems to only populate one for players it's actually
-                    # computed a number for), but appliedStatTotal is
-                    # populated far more broadly. Safe for BOTH actual and
-                    # projected reads: this function is only ever called
-                    # with stat_source_id=1 for weeks strictly after
-                    # whichever one is live (see pull_season's
-                    # future_pairings_by_week), so no player can have a real
-                    # actual score recorded yet for those weeks -- meaning
-                    # this field can only be ESPN's own current projection
-                    # there, never a stale/mismatched actual number. Without
-                    # this fallback, any player missing a dedicated
-                    # statSourceId=1 entry silently contributed 0 to their
-                    # team's projected total instead of their real
-                    # projection, which is what made Projected Finish read
-                    # far lower than ESPN's own displayed projected total.
+                if points_fn is not None:
+                    points = points_fn(player, week)
+                else:
+                    points = _player_week_points(player, week, stat_source_id)
+                if points is None and stat_source_id == 0 and points_fn is None:
+                    # Fallback only applies to a plain actual (not
+                    # projected, not blended) read -- appliedStatTotal
+                    # reflects whatever ESPN currently treats as "the"
+                    # total for this roster entry, which is only a safe
+                    # stand-in for the real statSourceId=0 lookup above,
+                    # not necessarily a specific projection.
                     points = entry.get("playerPoolEntry", {}).get("appliedStatTotal")
 
                 rows.append(
@@ -404,15 +432,72 @@ def pull_season(conn, league_config, year, external_season_id):
             live_matchup_records = []
             live_player_rows = []
 
+    # The live week's own contribution to "Projected Finish": points already
+    # earned by anyone who's already played this week, PLUS this platform's
+    # own projection for anyone who hasn't played yet -- see
+    # _blended_player_week_points for exactly why that's not the same as
+    # live_matchup_records above (which stays pure-actual, for the real
+    # leaderboard). Reuses live_pairings (same live week, same pairings) but
+    # re-fetches the boxscore and re-extracts with the blended point
+    # function instead of reusing live_player_rows, since those were built
+    # with a plain actual-only read. A user reported Projected Finish
+    # reading far lower than ESPN's own displayed projected total; this
+    # turned out to be the entire gap -- the live week was previously
+    # missing from projected_matchups altogether, so Projected Finish fell
+    # back to the real (pure-actual, "points scored so far only") live
+    # total for it instead of blending in projections for anyone who hasn't
+    # played yet. Wrapped in its own try/except for the same reason as the
+    # live block above: a hiccup here just means this run's Projected
+    # Finish doesn't have a live-week number yet, not that the whole pull
+    # should fail.
+    projected_matchup_records = []
+    if live_week is not None and live_pairings:
+        try:
+            live_week_raw = fetch_week_boxscore(external_season_id, year, live_week, espn_s2, swid)
+            blended_rows = extract_player_rows(
+                live_week_raw, year, live_week, team_manager, team_name,
+                points_fn=_blended_player_week_points,
+            )
+            blended_points_by_team = {}
+            for row in blended_rows:
+                tid = row["platform_team_id"]
+                blended_points_by_team[tid] = round(
+                    blended_points_by_team.get(tid, 0.0) + (row["points"] or 0.0), 2
+                )
+
+            for pairing in live_pairings:
+                home_id = pairing["home_platform_team_id"]
+                away_id = pairing["away_platform_team_id"]
+                projected_matchup_records.append(
+                    {
+                        "week": pairing["week"],
+                        "matchup_id": pairing["matchup_id"],
+                        "home_platform_team_id": home_id,
+                        "away_platform_team_id": away_id,
+                        "home_points": blended_points_by_team.get(home_id, 0.0),
+                        "away_points": blended_points_by_team.get(away_id) if away_id is not None else None,
+                        "is_bye": pairing["is_bye"],
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001 -- see comment above
+            print(f"    Could not build blended live-week projection for week {live_week}: {exc}", file=sys.stderr)
+
     # Beyond the live week (if any), pull PROJECTED per-player points
     # (statSourceId=1, see extract_player_rows) for every other week ESPN's
     # schedule already knows about, through MAX_PROJECTED_WEEK -- same
     # provisional-matchup shape as live_matchup_records above, just spanning
     # however many future weeks future_pairings_by_week has instead of one.
-    # Wrapped in its own try/except for the same reason as the live block:
-    # a hiccup here is a nice-to-have miss, not worth failing the pull over.
-    projected_matchup_records = []
+    # Appends to the same projected_matchup_records list as the blended
+    # live-week block above. Wrapped in its own try/except for the same
+    # reason as the live block: a hiccup here is a nice-to-have miss, not
+    # worth failing the pull over.
     if future_pairings_by_week:
+        # Accumulated separately from projected_matchup_records and only
+        # merged in on success -- an error partway through this loop should
+        # discard just these (possibly-partial) future weeks, the same
+        # all-or-nothing behavior as before, without also wiping out the
+        # live week's blended entry already appended above.
+        future_records = []
         try:
             for week in sorted(future_pairings_by_week):
                 week_raw = fetch_week_boxscore(external_season_id, year, week, espn_s2, swid)
@@ -437,7 +522,7 @@ def pull_season(conn, league_config, year, external_season_id):
                 for pairing in future_pairings_by_week[week]:
                     home_id = pairing["home_platform_team_id"]
                     away_id = pairing["away_platform_team_id"]
-                    projected_matchup_records.append(
+                    future_records.append(
                         {
                             "week": pairing["week"],
                             "matchup_id": pairing["matchup_id"],
@@ -448,12 +533,12 @@ def pull_season(conn, league_config, year, external_season_id):
                             "is_bye": pairing["is_bye"],
                         }
                     )
+            projected_matchup_records.extend(future_records)
         except Exception as exc:  # noqa: BLE001 -- see comment above
             print(
                 f"    Could not pull projected weeks {sorted(future_pairings_by_week)}: {exc}",
                 file=sys.stderr,
             )
-            projected_matchup_records = []
 
     return {
         "platform": PLATFORM,

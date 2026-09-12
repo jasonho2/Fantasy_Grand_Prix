@@ -382,14 +382,35 @@ export async function GET(request) {
   const doubleDashRanked = pairWeeks(allMatchupRows, allWeeklyRows);
 
   // "Projected Finish": the same two ranking pipelines above, just fed
-  // decided + live + projected rows instead of decided + live only, so a
-  // cup's leaderboard can be computed through its FULL window (see db.py's
+  // decided + projected rows instead of decided + live only, so a cup's
+  // leaderboard can be computed through its FULL window (see db.py's
   // projected_matchups schema comment). Deliberately independent of
   // ranked/doubleDashRanked/maxWeek above, which continue to reflect only
   // real data -- this is only consulted when a viewer explicitly picks
   // "Projected Finish" on the Contests page.
-  const allWeeklyRowsWithProjection = [...allWeeklyRows, ...projectedWeeklyRows];
-  const allMatchupRowsWithProjection = [...allMatchupRows, ...projectedMatchupRows];
+  //
+  // The live week needs special handling here: platforms/espn.py's
+  // pull_season now writes a projected_matchups row for the live week too
+  // -- not just genuinely future ones -- using each player's actual score
+  // if they've already played this week, blended with this platform's own
+  // projection for anyone who hasn't (see _blended_player_week_points).
+  // That's a materially different (and, per a user's real-numbers report,
+  // much more accurate) number than live_matchups' pure "points scored so
+  // far only" row for the same week, so the two must never both land in
+  // projectedRanked/projectedDoubleDashRanked -- summing both would double
+  // that manager's live-week contribution. Drop the real live rows for any
+  // week that already has a projected counterpart (normally just the live
+  // week) before merging, falling back to the real live rows untouched if
+  // the projected pull hasn't produced one yet (e.g. a transient failure
+  // this run, or right after this ships, before the next pipeline run) --
+  // see platforms/espn.py's blended live-week block for when that row gets
+  // written.
+  const projectedWeeks = new Set(projectedWeeklyRows.map((r) => r.week));
+  const realWeeklyRowsForProjection = allWeeklyRows.filter((r) => !projectedWeeks.has(r.week));
+  const realMatchupRowsForProjection = allMatchupRows.filter((r) => !projectedWeeks.has(r.week));
+
+  const allWeeklyRowsWithProjection = [...realWeeklyRowsForProjection, ...projectedWeeklyRows];
+  const allMatchupRowsWithProjection = [...realMatchupRowsForProjection, ...projectedMatchupRows];
   const projectedRanked = rankWeeks(allWeeklyRowsWithProjection).ranked;
   const projectedDoubleDashRanked = pairWeeks(allMatchupRowsWithProjection, allWeeklyRowsWithProjection);
 
