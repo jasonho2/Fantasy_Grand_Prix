@@ -11,9 +11,9 @@ import {
 // config.json and loaded into the contest_windows table by the pipeline --
 // not hardcoded here, since they can vary by league/season/commissioner.
 // Each cup's actual week boundaries, however, come from CUP_WEEK_SETS
-// below (positionally overriding whatever's in contest_windows) so a
-// viewer can toggle between the 15-week and 16-week structures live via
-// ?cupWeeks=15|16, independent of season -- see that constant's comment.
+// below (positionally overriding whatever's in contest_windows), chosen by
+// this league's own configured cup_weeks setting (Manage Leagues'
+// CupWeeksPicker) -- see that constant's comment.
 //
 // Two scoring modes, both Mario-Kart-style weekly placement points that
 // accumulate cumulatively across a contest window's weeks (each week's
@@ -58,11 +58,12 @@ import {
 // of any point table) -- not currently consumed by the frontend, but cheap
 // to include and useful for spot-checking a cup's numbers.
 
-// The two supported Grand Prix cup lengths, viewable via ?cupWeeks=15|16 --
-// independent of season (see below), since the cup leaderboard is already
-// computed live from raw weekly scores per-request (nothing about a cup's
-// standings is precomputed or cached beyond its week boundaries), so
-// switching structures needs no pipeline re-run or database change.
+// The two supported Grand Prix cup lengths, selected by this league's own
+// configured cup_weeks setting (see leagueRows/normalizeCupWeeks below) --
+// independent of season, since the cup leaderboard is already computed
+// live from raw weekly scores per-request (nothing about a cup's standings
+// is precomputed or cached beyond its week boundaries), so a commissioner
+// changing this setting needs no pipeline re-run or database migration.
 //
 // "15" is the original 3/4/4/4-week split (Mushroom 1-3, Flower 4-7, Star
 // 8-11, Special 12-15). "16" is the league's new policy, a uniform
@@ -111,13 +112,14 @@ export async function GET(request) {
     [season, league]
   ).catch(() => []);
   const leagueName = leagueRows[0]?.name ?? null;
-  // ?cupWeeks explicitly wins when present (the live viewer-facing toggle);
-  // otherwise fall back to this league's configured default, then 16.
-  const cupWeeksParam = params.get("cupWeeks");
-  const cupWeeks =
-    cupWeeksParam === "15" || cupWeeksParam === "16"
-      ? Number(cupWeeksParam)
-      : normalizeCupWeeks(leagueRows[0]?.cupWeeks);
+  // Cup length is this league's own configured setting (Manage Leagues'
+  // CupWeeksPicker, see web/app/leagues/new/page.js) -- falls back to 16
+  // for a league that's never set one. This used to also accept a
+  // ?cupWeeks query param as a viewer-facing override; removed since the
+  // per-league setting made that redundant (and confusing -- a viewer's
+  // override could silently disagree with what the commissioner
+  // configured).
+  const cupWeeks = normalizeCupWeeks(leagueRows[0]?.cupWeeks);
   let scoringConfig = null;
   try {
     scoringConfig = leagueRows[0]?.scoringConfigRaw ? JSON.parse(leagueRows[0].scoringConfigRaw) : null;

@@ -46,7 +46,6 @@ function NavInner() {
   // writes those selects now make).
   const [league] = useUrlState("league");
   const [season] = useUrlState("season");
-  const [cupWeeks] = useUrlState("cupWeeks");
 
   const { data: meta, refetch: refetchMeta } = useJson(
     `/api/meta${league ? `?league=${encodeURIComponent(league)}` : ""}`
@@ -58,16 +57,15 @@ function NavInner() {
   // once the page's content is refined.
   const links = [{ href: "/about", label: "About" }, { href: "/contests", label: grandPrixLabel }, ...BASE_LINKS];
 
-  // Carry the selected league, season, and Grand Prix cup length across
-  // page navigation, so picking any of them on one page doesn't silently
-  // reset when clicking to another. cupWeeks only matters on the Contests
-  // page today, but carrying it everywhere (like league/season) means it's
-  // still there if you leave and come back to Contests.
+  // Carry the selected league and season across page navigation, so
+  // picking either on one page doesn't silently reset when clicking to
+  // another. Grand Prix cup length used to be carried the same way (a
+  // viewer-facing override), but that's now a per-league setting
+  // configured in Manage Leagues instead -- see api/contests/route.js.
   function hrefFor(href) {
     const params = new URLSearchParams();
     if (league) params.set("league", league);
     if (season) params.set("season", season);
-    if (cupWeeks) params.set("cupWeeks", cupWeeks);
     const qs = params.toString();
     return qs ? `${href}?${qs}` : href;
   }
