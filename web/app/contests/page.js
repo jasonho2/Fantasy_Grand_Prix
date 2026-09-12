@@ -151,8 +151,17 @@ function ContestPanel({ contest, league, season, logos }) {
   // only changes display order within whichever mode is selected. Opens on
   // this cup's league-configured default mode rather than always Solo.
   const [mode, setMode] = useState(defaultMode);
+  // A cup that hasn't started yet has an empty real leaderboard (no weeks
+  // played) -- opening it on the normal "Total" sort would just show the
+  // "No games played in this window yet" empty state despite this cup
+  // having a full slate of projections available (that's exactly why it's
+  // visible at all now -- see startedContests' filter above). Opening
+  // straight on "Projected Finish" instead means there's actually something
+  // to look at the moment this panel appears. A cup already under way (or
+  // finished) keeps opening on the real "Total" sort, unchanged.
+  const defaultSortBy = contest.status === "upcoming" ? "projected" : "contest_points";
   // Descending only, per spec -- just which column, not direction.
-  const [sortBy, setSortBy] = useState("contest_points");
+  const [sortBy, setSortBy] = useState(defaultSortBy);
   const [view, setView] = useState("table");
   // Clicking a team's name in the chart legend narrows the chart to just
   // that team's line; clicking it again, or clicking anywhere else in the
@@ -196,7 +205,7 @@ function ContestPanel({ contest, league, season, logos }) {
   // "Total" sort and table view every cup opens on -- so there'd be
   // nothing for "Reset to Default" to do. Used to disable that button
   // rather than let it be a no-op click.
-  const isAtDefault = mode === defaultMode && sortBy === "contest_points" && view === "table";
+  const isAtDefault = mode === defaultMode && sortBy === defaultSortBy && view === "table";
 
   // Restores this cup's entire display to how it looked before any of
   // these were touched: the mode (Solo vs Double Dash), the Sort by
@@ -207,7 +216,7 @@ function ContestPanel({ contest, league, season, logos }) {
   // for this button to reset on that front.
   function resetToDefault() {
     setMode(defaultMode);
-    setSortBy("contest_points");
+    setSortBy(defaultSortBy);
     setView("table");
   }
 
@@ -611,13 +620,27 @@ function ContestsInner() {
   // Special), which is right for the weeks *within* a cup but backwards for
   // which cup you want to see first: the one currently being played, or
   // the last one that finished once the season's over. Reverse the order
-  // and drop anything that hasn't started -- an "upcoming" cup with no
-  // games yet has nothing to show, and would otherwise sit at the top
-  // (since it's chronologically last) pushing the cup people actually care
-  // about down the page. As the season progresses, each newly-started cup
-  // takes over the top spot the same way.
+  // and drop anything that hasn't started AND has no projections either --
+  // a genuinely empty "upcoming" cup (no real data, no projections yet)
+  // still has nothing to show, and would otherwise sit at the top (since
+  // it's chronologically last) pushing the cup people actually care about
+  // down the page. But an "upcoming" cup that already has a full slate of
+  // projected_matchups (see api/contests/route.js's projectedLeaderboard)
+  // is exactly the case "Projected Finish" exists for -- seeing the whole
+  // rest of the season's cups projected out, not just the one currently in
+  // progress -- so it stays visible (opening straight on Projected Finish;
+  // see ContestPanel's defaultSortBy). As the season progresses, each
+  // newly-started cup takes over the top spot the same way as before.
   const startedContests = useMemo(
-    () => (data?.contests || []).filter((c) => c.status !== "upcoming").reverse(),
+    () =>
+      (data?.contests || [])
+        .filter(
+          (c) =>
+            c.status !== "upcoming" ||
+            c.projectedLeaderboard?.length > 0 ||
+            c.projectedDoubleDashLeaderboard?.length > 0
+        )
+        .reverse(),
     [data]
   );
 
