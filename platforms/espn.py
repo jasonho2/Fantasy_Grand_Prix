@@ -149,12 +149,26 @@ def extract_player_rows(week_raw, year, week, team_manager, team_name, stat_sour
 
                 player = entry.get("playerPoolEntry", {}).get("player", {})
                 points = _player_week_points(player, week, stat_source_id)
-                if points is None and stat_source_id == 0:
-                    # Fallback only applies to actual (not projected) reads --
-                    # appliedStatTotal reflects whatever ESPN currently treats
-                    # as "the" total for this roster entry, which is only a
-                    # safe stand-in for the real statSourceId=0 lookup above,
-                    # not necessarily a specific projection.
+                if points is None:
+                    # Fallback: appliedStatTotal reflects whatever ESPN
+                    # currently treats as "the" total for this roster entry
+                    # -- not every player has a specific statSourceId entry
+                    # in their `stats` array for every scoring period (ESPN
+                    # seems to only populate one for players it's actually
+                    # computed a number for), but appliedStatTotal is
+                    # populated far more broadly. Safe for BOTH actual and
+                    # projected reads: this function is only ever called
+                    # with stat_source_id=1 for weeks strictly after
+                    # whichever one is live (see pull_season's
+                    # future_pairings_by_week), so no player can have a real
+                    # actual score recorded yet for those weeks -- meaning
+                    # this field can only be ESPN's own current projection
+                    # there, never a stale/mismatched actual number. Without
+                    # this fallback, any player missing a dedicated
+                    # statSourceId=1 entry silently contributed 0 to their
+                    # team's projected total instead of their real
+                    # projection, which is what made Projected Finish read
+                    # far lower than ESPN's own displayed projected total.
                     points = entry.get("playerPoolEntry", {}).get("appliedStatTotal")
 
                 rows.append(
