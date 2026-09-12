@@ -657,7 +657,18 @@ function ContestsInner() {
 
       {startedContests.map((contest) => (
         <ContestPanel
-          key={contest.name}
+          // Keyed on league+season+cup, not just the cup name: cup names
+          // repeat every season ("Mushroom Cup" exists in 2025 and 2026
+          // alike), so a plain `contest.name` key would have React treat
+          // switching seasons as updating the same panel in place --
+          // leaving ContestPanel's own Mode/Sort by/View state (initialized
+          // once via useState) stuck on whatever the previously-viewed
+          // season had, instead of that state's initializers re-running
+          // against the new season's contest.defaultMode. Including
+          // league+season forces a fresh mount per season (and per league),
+          // so every cup opens on its own season's configured default the
+          // moment you switch, exactly like a first load of that season would.
+          key={`${activeLeague}-${activeSeason}-${contest.name}`}
           contest={contest}
           league={activeLeague}
           season={activeSeason}
