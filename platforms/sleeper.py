@@ -35,6 +35,7 @@ premium, etc.) the player-level numbers may not add up to precisely the
 team's real weekly total; the team-level total itself is still exact.
 """
 
+import sys
 from datetime import datetime, timedelta
 
 import requests
@@ -43,6 +44,29 @@ import db as db_module
 
 BASE = "https://api.sleeper.app/v1"
 PLATFORM = "sleeper"
+
+# Sleeper's own undocumented weekly projections endpoint -- a different host
+# path than everything else in this module (no /v1, and shaped differently:
+# a flat list of {player_id, stats: {...}} objects rather than a dict keyed
+# straight by player_id the way /stats/nfl/regular/<year>/<week> is -- see
+# _fetch_projected_stats). Not part of Sleeper's documented API, so treated
+# defensively throughout: a failure here should mean "no projection this
+# week," never a broken pipeline run.
+PROJECTIONS_BASE = "https://api.sleeper.app/projections/nfl"
+
+# Positions actually eligible to start in a standard fantasy lineup --
+# passed as repeated position[] query params so the projections endpoint
+# doesn't have to hand back every IDP/return-specialist entry it tracks,
+# just the ones a roster's `starters` list could actually contain.
+PROJECTION_POSITIONS = ["QB", "RB", "WR", "TE", "K", "DEF"]
+
+# How far out (in absolute week number) to keep asking Sleeper for
+# projected scores when building the "Projected Finish" Contests view --
+# deliberately tied to this app's own Grand Prix bounds (the longest
+# supported cup structure ends at week 16, see web/lib/scoring.js's
+# DEFAULT_CUP_WEEKS/CUP_WEEK_SETS) rather than the NFL's actual season
+# length. Same constant/reasoning as platforms/espn.py's MAX_PROJECTED_WEEK.
+MAX_PROJECTED_WEEK = 16
 
 # How long we trust a previous full-player-list sync before pulling it
 # again, per Sleeper's "at most once a day" guidance. Kept a bit under 24h
@@ -130,6 +154,78 @@ def _fetch_played_weeks(external_season_id, max_week=18):
             break
         weeks[week] = data
     return weeks
+
+
+def _fetch_future_weeks(external_season_id, start_week, max_week=MAX_PROJECTED_WEEK):
+    """Matchup pairings for every week from start_week through max_week --
+    unlike _fetch_played_weeks above, this doesn't require nonzero points,
+    since a future week's pairing is exactly what's wanted while its real
+    points are still zero/unset. Sleeper generates and exposes a league's
+    full season schedule up front, so a future week's roster_id/matchup_id
+    pairing is already available this way. Stops at the first week with no
+    data at all (the schedule doesn't extend that far)."""
+    weeks = {}
+    for week in range(start_week, max_week + 1):
+        try:
+            data = _get(f"/league/{external_season_id}/matchups/{week}")
+        except RuntimeError:
+            break
+        if not data:
+            break
+        weeks[week] = data
+    return weeks
+
+
+def _fetch_projected_stats(year, week):
+    """Sleeper's own undocumented weekly projections endpoint -- see
+    PROJECTIONS_BASE's comment for how its shape differs from the actual-
+    points endpoint this reshapes to match. Returns {player_id: stats},
+    same convention _extract_player_rows already expects from `stats`, or
+    {} on any failure (wrong shape, network error, endpoint gone) -- this
+    is unofficial and could change or disappear without notice, and a
+    missing projection should just mean "no data for this week yet."""
+    try:
+        resp = requests.get(
+            f"{PROJECTIONS_BASE}/{year}/{week}",
+            params={"season_type": "regular", "position[]": PROJECTION_POSITIONS},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return {}
+        entries = resp.json() or []
+        return {e["player_id"]: (e.get("stats") or {}) for e in entries if e.get("player_id")}
+    except Exception:  # noqa: BLE001 -- unofficial endpoint, fail soft
+        return {}
+
+
+def _projected_matchup_records(week, matchups_list, points_by_roster):
+    """Same pairing shape as _matchups_to_records below, but for a future
+    week: no `winner` to compute (nothing's been played), and points come
+    from `points_by_roster` (this week's projected sums) rather than
+    Sleeper's own recorded points."""
+    by_matchup_id = {}
+    for m in matchups_list:
+        by_matchup_id.setdefault(m.get("matchup_id"), []).append(m)
+
+    records = []
+    for matchup_id, entries in by_matchup_id.items():
+        entries = sorted(entries, key=lambda e: e["roster_id"])
+        home = entries[0]
+        away = entries[1] if len(entries) > 1 else None
+        home_id = str(home["roster_id"])
+        away_id = str(away["roster_id"]) if away else None
+        records.append(
+            {
+                "week": week,
+                "matchup_id": matchup_id,
+                "home_platform_team_id": home_id,
+                "away_platform_team_id": away_id,
+                "home_points": points_by_roster.get(home_id, 0.0),
+                "away_points": points_by_roster.get(away_id) if away_id is not None else None,
+                "is_bye": away is None,
+            }
+        )
+    return records
 
 
 def _matchups_to_records(week, matchups_list):
@@ -285,6 +381,51 @@ def pull_season(conn, league_config, year, external_season_id):
     playoff_week_start = (league.get("settings") or {}).get("playoff_week_start")
     regular_season_weeks = playoff_week_start - 1 if playoff_week_start else None
 
+    # Beyond the last actually-played week, pull PROJECTED per-player points
+    # for every future week Sleeper still has scheduled, through
+    # MAX_PROJECTED_WEEK -- same provisional-matchup shape ESPN's live pull
+    # produces (this platform has no live-week concept of its own, see
+    # module docstring), just spanning however many future weeks are found
+    # instead of one. Wrapped in its own try/except: a hiccup pulling
+    # projections is a nice-to-have miss, not worth failing the whole
+    # season's pull over.
+    projected_matchup_records = []
+    last_played_week = max(weeks_data.keys(), default=0)
+    future_weeks_data = _fetch_future_weeks(external_season_id, last_played_week + 1)
+    if future_weeks_data:
+        try:
+            future_needed_ids = set()
+            for week_matchups in future_weeks_data.values():
+                for m in week_matchups:
+                    future_needed_ids.update(m.get("starters") or [])
+            _sync_players_if_needed(conn, future_needed_ids)
+
+            for week, week_matchups in sorted(future_weeks_data.items()):
+                projected_stats = _fetch_projected_stats(year, week)
+                if not projected_stats:
+                    # Sleeper hasn't published projections this far out yet
+                    # -- skip rather than recording a misleading 0-0
+                    # "projection"; picks up real numbers automatically on
+                    # a later run once they're published.
+                    continue
+                week_player_rows = _extract_player_rows(
+                    conn, week_matchups, projected_stats, year, week, team_manager, team_name, pts_field
+                )
+                if not any(row["points"] is not None for row in week_player_rows):
+                    continue
+                points_by_roster = {}
+                for row in week_player_rows:
+                    rid = row["platform_team_id"]
+                    points_by_roster[rid] = round(
+                        points_by_roster.get(rid, 0.0) + (row["points"] or 0.0), 2
+                    )
+                projected_matchup_records.extend(
+                    _projected_matchup_records(week, week_matchups, points_by_roster)
+                )
+        except Exception as exc:  # noqa: BLE001 -- see comment above
+            print(f"    Could not pull projected weeks: {exc}", file=sys.stderr)
+            projected_matchup_records = []
+
     return {
         "platform": PLATFORM,
         "external_id": external_season_id,
@@ -294,4 +435,5 @@ def pull_season(conn, league_config, year, external_season_id):
         "team_name": team_name,
         "player_rows": player_rows,
         "matchup_records": matchup_records,
+        "projected_matchup_records": projected_matchup_records,
     }

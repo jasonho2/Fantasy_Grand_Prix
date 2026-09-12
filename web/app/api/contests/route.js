@@ -199,6 +199,45 @@ export async function GET(request) {
     });
   }
 
+  // Beyond the live week (if any), every other week a platform still has
+  // projected -- see db.py's projected_matchups schema comment. Only ever
+  // consulted for the "Projected Finish" sort option (projectedRanked/
+  // projectedDoubleDashRanked further down); the real leaderboard above
+  // never sees these rows.
+  const projectedRows = await query(
+    `SELECT pm.week,
+            hm.manager_name AS home_manager,
+            ht.team_name AS home_team,
+            pm.home_points,
+            am.manager_name AS away_manager,
+            at.team_name AS away_team,
+            pm.away_points,
+            pm.is_bye
+     FROM projected_matchups pm
+     JOIN teams ht ON ht.team_id = pm.home_team_id
+     JOIN managers hm ON hm.manager_id = ht.manager_id
+     LEFT JOIN teams at ON at.team_id = pm.away_team_id
+     LEFT JOIN managers am ON am.manager_id = at.manager_id
+     WHERE pm.season = ? AND pm.league_id = (SELECT league_id FROM leagues WHERE slug = ?)
+     ORDER BY pm.week`,
+    [season, league]
+  ).catch(() => []); // tolerate a not-yet-migrated DB that lacks projected_matchups
+
+  const projectedWeeklyRows = []; // same shape as weeklyRows/liveWeeklyRows
+  const projectedMatchupRows = []; // same shape as matchupRows/liveMatchupRows
+  for (const row of projectedRows) {
+    projectedWeeklyRows.push({ week: row.week, manager: row.home_manager, team: row.home_team, points: row.home_points });
+    if (!row.is_bye && row.away_manager != null) {
+      projectedWeeklyRows.push({ week: row.week, manager: row.away_manager, team: row.away_team, points: row.away_points });
+    }
+    projectedMatchupRows.push({
+      week: row.week,
+      home_manager: row.home_manager,
+      away_manager: row.is_bye ? null : row.away_manager,
+      is_bye: !!row.is_bye,
+    });
+  }
+
   // Everything below (Solo ranking, Double Dash pairing, managerTeam) reads
   // from allWeeklyRows/allMatchupRows rather than weeklyRows/matchupRows
   // directly, so the live week is ranked and paired exactly like any
@@ -207,39 +246,47 @@ export async function GET(request) {
 
   // A manager maps to exactly one team for the season -- grab that mapping
   // once so the leaderboard can be built/grouped by manager (a stable key)
-  // while still surfacing the team name for display.
+  // while still surfacing the team name for display. Includes
+  // projectedWeeklyRows too (harmless superset) so a manager whose only
+  // rows so far are projected ones (e.g. week 1 projections pulled before
+  // any real week has been decided) still resolves to a team name.
   const managerTeam = new Map();
-  for (const row of allWeeklyRows) {
+  for (const row of [...allWeeklyRows, ...projectedWeeklyRows]) {
     if (!managerTeam.has(row.manager)) managerTeam.set(row.manager, row.team);
   }
 
-  // Rank each week's teams by that week's fantasy points. Placement points
-  // aren't assigned here anymore -- which table applies can differ per cup
-  // (a league's per-cup scoring config), so turning a rank into points
-  // happens later, inside buildLeaderboard, once it's known which cup's
-  // window a given week falls into.
-  const byWeek = new Map();
-  for (const row of allWeeklyRows) {
-    if (!byWeek.has(row.week)) byWeek.set(row.week, []);
-    byWeek.get(row.week).push(row);
+  // Ranks each week's teams by that week's fantasy points. Placement points
+  // aren't assigned here -- which table applies can differ per cup (a
+  // league's per-cup scoring config), so turning a rank into points happens
+  // later, inside buildLeaderboard, once it's known which cup's window a
+  // given week falls into. Shared by the real (decided+live) ranking right
+  // below and the Projected Finish ranking further down -- same algorithm,
+  // just fed different weekly rows.
+  function rankWeeks(weeklyRowsInput) {
+    const byWk = new Map();
+    for (const row of weeklyRowsInput) {
+      if (!byWk.has(row.week)) byWk.set(row.week, []);
+      byWk.get(row.week).push(row);
+    }
+    const rankedRows = [];
+    let latestWeek = 0;
+    for (const [week, teams] of byWk) {
+      latestWeek = Math.max(latestWeek, week);
+      teams.sort((a, b) => b.points - a.points); // rows already came sorted; be explicit anyway
+      teams.forEach((row, i) => {
+        rankedRows.push({ week, manager: row.manager, points: row.points, rank: i + 1 });
+      });
+    }
+    return { ranked: rankedRows, latestWeek };
   }
 
-  const ranked = []; // { week, manager, points, rank }
-  let maxWeek = 0; // latest week with ANY data, decided or live -- see maxDecidedWeek above for "final" gating
-  for (const [week, teams] of byWeek) {
-    maxWeek = Math.max(maxWeek, week);
-    teams.sort((a, b) => b.points - a.points); // rows already came sorted; be explicit anyway
-    teams.forEach((row, i) => {
-      ranked.push({ week, manager: row.manager, points: row.points, rank: i + 1 });
-    });
-  }
+  // maxWeek: latest week with ANY REAL data, decided or live -- deliberately
+  // computed only from allWeeklyRows (never projectedWeeklyRows), since this
+  // drives each cup's "final"/"in_progress"/"upcoming" status below. Folding
+  // in projected future weeks here would make every cup with any projection
+  // data look "in_progress" through its very last week.
+  const { ranked, latestWeek: maxWeek } = rankWeeks(allWeeklyRows);
 
-  // Double Dash: pair each week's actual head-to-head matchup, rank pairs
-  // against every other pair in the league that week, and give BOTH
-  // members that placement's points -- each still keeps their own
-  // individual (weekly_manager_points) score as their reference column,
-  // only the placement points come from the pair.
-  //
   // Only used to find out *who played whom* -- not for the point values
   // themselves (see the file-level comment above for why: matchups'
   // points include a +1 bonus that shouldn't reach Mario Kart scoring).
@@ -262,62 +309,89 @@ export async function GET(request) {
   // to know or care that this week isn't decided yet.
   const allMatchupRows = [...matchupRows, ...liveMatchupRows];
 
-  // week -> manager -> points, straight off allWeeklyRows (Solo's decided
-  // + live rows from above) -- the bonus-free source of truth for what
-  // everyone actually scored that week, including teams a matchup row
-  // might not capture (see weekly_manager_points' own comment in db.py).
-  const pointsByWeek = new Map();
-  for (const row of allWeeklyRows) {
-    if (!pointsByWeek.has(row.week)) pointsByWeek.set(row.week, new Map());
-    pointsByWeek.get(row.week).set(row.manager, row.points);
-  }
-
-  const pairsByWeek = new Map(); // week -> [{ pairScore, members: [{manager, points}, ...] }]
-  const pairedManagersByWeek = new Map(); // week -> Set(manager) -- who's already covered by a real pair
-
-  for (const row of allMatchupRows) {
-    if (row.is_bye || row.away_manager == null) continue; // no opponent -- handled in the sweep below
-    const weekPoints = pointsByWeek.get(row.week) || new Map();
-    const homePoints = weekPoints.get(row.home_manager) ?? 0;
-    const awayPoints = weekPoints.get(row.away_manager) ?? 0;
-
-    if (!pairsByWeek.has(row.week)) pairsByWeek.set(row.week, []);
-    pairsByWeek.get(row.week).push({
-      pairScore: homePoints + awayPoints,
-      members: [
-        { manager: row.home_manager, points: homePoints },
-        { manager: row.away_manager, points: awayPoints },
-      ],
-    });
-
-    if (!pairedManagersByWeek.has(row.week)) pairedManagersByWeek.set(row.week, new Set());
-    pairedManagersByWeek.get(row.week).add(row.home_manager);
-    pairedManagersByWeek.get(row.week).add(row.away_manager);
-  }
-
-  // Anyone who fielded a lineup that week but wasn't part of a real pair --
-  // a bye, or a week the platform's schedule just doesn't list a matchup
-  // for -- still races, alone, ranked on their own score against
-  // everyone else's combined pair score. Not excluded from scoring.
-  for (const [week, weekPoints] of pointsByWeek) {
-    const paired = pairedManagersByWeek.get(week) || new Set();
-    for (const [manager, points] of weekPoints) {
-      if (paired.has(manager)) continue;
-      if (!pairsByWeek.has(week)) pairsByWeek.set(week, []);
-      pairsByWeek.get(week).push({ pairScore: points, members: [{ manager, points }] });
+  // Double Dash: pairs each week's actual head-to-head matchup, ranks pairs
+  // against every other pair in the league that week, and gives BOTH
+  // members that placement's points -- each still keeps their own
+  // individual (weekly_manager_points) score as their reference column,
+  // only the placement points come from the pair. `matchupRowsInput`
+  // supplies only who played whom, never point values (matchups' own
+  // points include a +1 bonus that shouldn't reach Mario Kart scoring --
+  // see the file-level comment); `weeklyRowsInput` supplies each manager's
+  // real score that week. Shared by the real (decided+live) Double Dash
+  // ranking right below and the Projected Finish ranking further down --
+  // same algorithm, just fed different weekly/matchup rows.
+  function pairWeeks(matchupRowsInput, weeklyRowsInput) {
+    // week -> manager -> points -- the bonus-free source of truth for what
+    // everyone actually scored that week, including teams a matchup row
+    // might not capture (see weekly_manager_points' own comment in db.py).
+    const pointsByWk = new Map();
+    for (const row of weeklyRowsInput) {
+      if (!pointsByWk.has(row.week)) pointsByWk.set(row.week, new Map());
+      pointsByWk.get(row.week).set(row.manager, row.points);
     }
+
+    const pairsByWk = new Map(); // week -> [{ pairScore, members: [{manager, points}, ...] }]
+    const pairedManagersByWk = new Map(); // week -> Set(manager) -- who's already covered by a real pair
+
+    for (const row of matchupRowsInput) {
+      if (row.is_bye || row.away_manager == null) continue; // no opponent -- handled in the sweep below
+      const weekPoints = pointsByWk.get(row.week) || new Map();
+      const homePoints = weekPoints.get(row.home_manager) ?? 0;
+      const awayPoints = weekPoints.get(row.away_manager) ?? 0;
+
+      if (!pairsByWk.has(row.week)) pairsByWk.set(row.week, []);
+      pairsByWk.get(row.week).push({
+        pairScore: homePoints + awayPoints,
+        members: [
+          { manager: row.home_manager, points: homePoints },
+          { manager: row.away_manager, points: awayPoints },
+        ],
+      });
+
+      if (!pairedManagersByWk.has(row.week)) pairedManagersByWk.set(row.week, new Set());
+      pairedManagersByWk.get(row.week).add(row.home_manager);
+      pairedManagersByWk.get(row.week).add(row.away_manager);
+    }
+
+    // Anyone who fielded a lineup that week but wasn't part of a real pair
+    // -- a bye, or a week the platform's schedule just doesn't list a
+    // matchup for -- still races, alone, ranked on their own score against
+    // everyone else's combined pair score. Not excluded from scoring.
+    for (const [week, weekPoints] of pointsByWk) {
+      const paired = pairedManagersByWk.get(week) || new Set();
+      for (const [manager, points] of weekPoints) {
+        if (paired.has(manager)) continue;
+        if (!pairsByWk.has(week)) pairsByWk.set(week, []);
+        pairsByWk.get(week).push({ pairScore: points, members: [{ manager, points }] });
+      }
+    }
+
+    const rankedRows = []; // { week, manager, points, rank }
+    for (const [week, pairs] of pairsByWk) {
+      pairs.sort((a, b) => b.pairScore - a.pairScore);
+      pairs.forEach((pair, i) => {
+        const rank = i + 1;
+        for (const member of pair.members) {
+          rankedRows.push({ week, manager: member.manager, points: member.points, rank });
+        }
+      });
+    }
+    return rankedRows;
   }
 
-  const doubleDashRanked = []; // { week, manager, points, rank }
-  for (const [week, pairs] of pairsByWeek) {
-    pairs.sort((a, b) => b.pairScore - a.pairScore);
-    pairs.forEach((pair, i) => {
-      const rank = i + 1;
-      for (const member of pair.members) {
-        doubleDashRanked.push({ week, manager: member.manager, points: member.points, rank });
-      }
-    });
-  }
+  const doubleDashRanked = pairWeeks(allMatchupRows, allWeeklyRows);
+
+  // "Projected Finish": the same two ranking pipelines above, just fed
+  // decided + live + projected rows instead of decided + live only, so a
+  // cup's leaderboard can be computed through its FULL window (see db.py's
+  // projected_matchups schema comment). Deliberately independent of
+  // ranked/doubleDashRanked/maxWeek above, which continue to reflect only
+  // real data -- this is only consulted when a viewer explicitly picks
+  // "Projected Finish" on the Contests page.
+  const allWeeklyRowsWithProjection = [...allWeeklyRows, ...projectedWeeklyRows];
+  const allMatchupRowsWithProjection = [...allMatchupRows, ...projectedMatchupRows];
+  const projectedRanked = rankWeeks(allWeeklyRowsWithProjection).ranked;
+  const projectedDoubleDashRanked = pairWeeks(allMatchupRowsWithProjection, allWeeklyRowsWithProjection);
 
   // Sums a set of ranked rows into manager -> cumulative { contest_points,
   // fantasy_points }, the same reduction used for both the real leaderboard
@@ -439,6 +513,21 @@ export async function GET(request) {
       liveWeek: liveWeek != null && liveWeek >= w.start_week && liveWeek <= w.end_week ? liveWeek : null,
       leaderboard: buildLeaderboard(ranked, w, soloTable),
       doubleDashLeaderboard: buildLeaderboard(doubleDashRanked, w, doubleDashTable),
+      // "Projected Finish" -- same leaderboard shape/scoring as above, but
+      // extended through this cup's full window using projected_matchups
+      // for any week beyond whichever one is live/decided (see the
+      // projectedRanked/projectedDoubleDashRanked construction above). A
+      // cup with no projection data available yet for a given remaining
+      // week just shows that week as null/unplayed, same as any other
+      // unplayed week -- see the "skip a week with no real projections
+      // yet" comments in platforms/espn.py and platforms/sleeper.py. Note
+      // rankDelta here compares against this cup's second-to-last window
+      // week rather than "the last real week," since buildLeaderboard has
+      // no separate concept of "real" vs "projected" within rankedRows --
+      // it reads as "projected rank movement over the rest of the cup,"
+      // which is a reasonable bonus signal, not a bug.
+      projectedLeaderboard: buildLeaderboard(projectedRanked, w, soloTable),
+      projectedDoubleDashLeaderboard: buildLeaderboard(projectedDoubleDashRanked, w, doubleDashTable),
       // Which mode/table the league configured as this cup's default (for
       // this season) -- lets the frontend open on that mode, treat it as
       // what "Reset to Default" resets the view back to, and describe it in

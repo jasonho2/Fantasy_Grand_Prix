@@ -54,13 +54,17 @@ function weekSortKey(weekIndex) {
 // (weekly_points[i]). A bye/unplayed week is null, not 0; sorting by that
 // week should still put those teams last (descending sort, so the lowest
 // value sorts to the bottom) rather than tied with a team that actually
-// scored 0 that week.
+// scored 0 that week. "projected" isn't a real field on a row -- picking it
+// swaps modeLeaderboard's whole source to the projected leaderboard (see
+// ContestPanel below), whose rows still use "contest_points" as the total
+// to rank by, same as the real "Total" sort.
 function sortValueFor(row, sortBy) {
   if (typeof sortBy === "string" && sortBy.startsWith(WEEK_SORT_PREFIX)) {
     const weekIndex = Number(sortBy.slice(WEEK_SORT_PREFIX.length));
     const points = row.weekly_points[weekIndex];
     return points == null ? -Infinity : points;
   }
+  if (sortBy === "projected") return row.contest_points;
   return row[sortBy];
 }
 
@@ -173,7 +177,20 @@ function ContestPanel({ contest, league, season, logos }) {
     return () => document.removeEventListener("click", closeTooltip);
   }, [scoringTooltipOpen]);
 
-  const modeLeaderboard = mode === "solo" ? contest.leaderboard : contest.doubleDashLeaderboard;
+  // "Projected Finish" swaps the whole leaderboard source rather than just
+  // changing sort order within the real one -- it's the same cup, same
+  // scoring, but with any week beyond whichever one is live/decided filled
+  // in from that platform's own projections instead of left blank (see
+  // api/contests/route.js's projectedLeaderboard/projectedDoubleDashLeaderboard).
+  // Falls back to [] defensively; the API always returns an array here
+  // (possibly empty, e.g. a not-yet-migrated DB or a cup with no projection
+  // data yet), never undefined.
+  const modeLeaderboard =
+    sortBy === "projected"
+      ? (mode === "solo" ? contest.projectedLeaderboard : contest.projectedDoubleDashLeaderboard) || []
+      : mode === "solo"
+        ? contest.leaderboard
+        : contest.doubleDashLeaderboard;
 
   // Already showing exactly what the league configured, plus the plain
   // "Total" sort and table view every cup opens on -- so there'd be
@@ -345,6 +362,14 @@ function ContestPanel({ contest, league, season, logos }) {
             onClick={() => setSortBy("fantasy_points")}
           >
             Fantasy Points (ref)
+          </button>
+          <button
+            type="button"
+            className={`week-chip${sortBy === "projected" ? " selected" : ""}`}
+            onClick={() => setSortBy("projected")}
+            title="Actual points for weeks already played, plus this platform's own projection for every week still to come in this cup."
+          >
+            Projected Finish
           </button>
         </div>
         <span style={{ fontSize: 13, color: "var(--text-dim)" }}>Mode:</span>

@@ -122,6 +122,29 @@ live_player_points      one row per starting-lineup player for whichever
                         `weekly_player_points` rows so the Player Totals
                         table and Points-by-Position chart both include
                         the in-progress week's provisional stats.
+projected_matchups      one row per team for every week AFTER whichever one
+                        is currently live (if any) -- through
+                        MAX_PROJECTED_WEEK -- that a platform still has on
+                        its schedule, scoped by league_id + season same as
+                        matchups/live_matchups. Same wholesale-replace-
+                        every-run convention as live_matchups (delete then
+                        insert every pipeline run), just covering several
+                        weeks at once instead of one: as each of those weeks
+                        gets decided (or goes live), the next run's real
+                        matchup_records/live_matchup_records take over for
+                        it and it drops out of this table's replace set.
+                        home_points/away_points here are PROJECTED, not
+                        actual -- a platform's own projection for that
+                        player/week (ESPN: statSourceId=1 in the same
+                        boxscore call used for actuals; Sleeper: a separate
+                        undocumented projections endpoint), summed per team
+                        the same bonus-free way as everywhere else. Read
+                        only by api/contests/route.js, to extend a cup's
+                        leaderboard past its last played week for the
+                        "Projected Finish" sort option -- never by
+                        standings or matchups, where a hypothetical future
+                        score has no business appearing next to real
+                        results.
 """
 
 import os
@@ -295,6 +318,25 @@ CREATE TABLE IF NOT EXISTS live_player_points (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_live_player_points_league_season ON live_player_points(league_id, season);
+
+-- Same wholesale-replace-every-run convention as live_matchups above, just
+-- covering every week after the live one (if any) through
+-- MAX_PROJECTED_WEEK instead of a single week -- see the docstring's
+-- projected_matchups entry above. home_points/away_points here are a
+-- platform's own projection for that team, not an actual result.
+CREATE TABLE IF NOT EXISTS projected_matchups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    league_id INTEGER NOT NULL REFERENCES leagues(league_id),
+    season INTEGER NOT NULL,
+    week INTEGER NOT NULL,
+    home_team_id INTEGER NOT NULL REFERENCES teams(team_id),
+    away_team_id INTEGER REFERENCES teams(team_id),
+    home_points REAL,
+    away_points REAL,
+    is_bye INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_projected_matchups_league_season ON projected_matchups(league_id, season);
 
 CREATE TABLE IF NOT EXISTS contest_windows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -673,6 +715,7 @@ def load_season(
     live_matchup_records=None,
     live_player_records=None,
     team_logo=None,
+    projected_matchup_records=None,
 ):
     """
     league_id: internal leagues.league_id (see get_or_create_league)
@@ -702,6 +745,17 @@ def load_season(
                       Always fully replaces this league/season's
                       live_player_points rows, same convention (and same
                       reasoning) as live_matchup_records above.
+    projected_matchup_records: same shape as matchup_records, but for every
+                      week AFTER whichever one is live (if any) that the
+                      platform still has projections for -- see the
+                      projected_matchups table's schema comment up top.
+                      Always fully replaces this league/season's
+                      projected_matchups rows, same full-replace convention
+                      (and same reasoning) as live_matchup_records above --
+                      a week that WAS in this set and has since gone live or
+                      been decided should stop appearing here on the very
+                      next run, not linger as a stale projection alongside
+                      the real data that's since taken over for it.
     """
     team_logo = team_logo or {}
     team_id_map = {}  # platform_team_id (as given) -> internal teams.team_id
@@ -821,6 +875,35 @@ def load_season(
             """INSERT INTO live_player_points (league_id, season, week, team_id, player_id, points, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
             (league_id, row["season"], row["week"], team_id, player_id, row["points"]),
+        )
+
+    # Same full-replace convention as live_matchups above, just spanning
+    # every remaining week the platform still has projections for instead
+    # of a single live one -- see projected_matchups' schema comment. Runs
+    # on every call (even when projected_matchup_records is empty) so a
+    # week that's since gone live or been decided doesn't linger here.
+    conn.execute("DELETE FROM projected_matchups WHERE league_id = ? AND season = ?", (league_id, year))
+    for m in projected_matchup_records or []:
+        home_team_id = team_id_map.get(m["home_platform_team_id"])
+        away_team_id = (
+            team_id_map.get(m["away_platform_team_id"]) if m.get("away_platform_team_id") is not None else None
+        )
+        if home_team_id is None:
+            continue
+        conn.execute(
+            """INSERT INTO projected_matchups (league_id, season, week, home_team_id, away_team_id,
+                                                 home_points, away_points, is_bye, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+            (
+                league_id,
+                year,
+                m["week"],
+                home_team_id,
+                away_team_id,
+                m["home_points"],
+                m["away_points"],
+                int(m["is_bye"]),
+            ),
         )
 
     conn.commit()

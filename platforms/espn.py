@@ -39,6 +39,18 @@ PRO_POSITION_MAP = {
 
 PLATFORM = "espn"
 
+# How far out (in absolute week number) to keep asking ESPN for projected
+# scores when building the "Projected Finish" Contests view -- deliberately
+# tied to this app's own Grand Prix bounds (the longest supported cup
+# structure ends at week 16, see web/lib/scoring.js's DEFAULT_CUP_WEEKS/
+# CUP_WEEK_SETS) rather than the NFL's actual season length (which runs
+# further, into playoff weeks this app's scoring never looks at). ESPN
+# itself won't have real projections populated that far ahead early in the
+# season anyway -- see the "skip a week with no real projections yet"
+# comment in pull_season -- so this is a ceiling, not a promise every week
+# up to it will actually have usable data.
+MAX_PROJECTED_WEEK = 16
+
 
 def fetch_league_json(league_id, year, espn_s2="", swid=""):
     """Fetch raw league JSON for a given season. Tries the current-season
@@ -103,18 +115,23 @@ def fetch_week_boxscore(league_id, year, week, espn_s2="", swid=""):
     return resp.json()
 
 
-def _player_week_points(player, week):
-    """Pull the actual (not projected) applied point total for a player in a
-    given scoring period from their stats list."""
+def _player_week_points(player, week, stat_source_id=0):
+    """Pull a player's point total for a given scoring period from their
+    stats list. statSourceId 0 (the default) is the actual applied total;
+    1 is the platform's own projection for that same player/week -- same
+    stats array either way, just a different entry in it. Returns None if
+    that scoring period/source combination isn't present at all (e.g. a
+    future week ESPN hasn't computed a projection for yet)."""
     for stat in player.get("stats", []):
-        if stat.get("scoringPeriodId") == week and stat.get("statSourceId") == 0:
+        if stat.get("scoringPeriodId") == week and stat.get("statSourceId") == stat_source_id:
             return stat.get("appliedTotal")
     return None
 
 
-def extract_player_rows(week_raw, year, week, team_manager, team_name):
+def extract_player_rows(week_raw, year, week, team_manager, team_name, stat_source_id=0):
     """Parse a single week's boxscore payload into one row per starting-lineup
-    player (bench/IR excluded)."""
+    player (bench/IR excluded). `stat_source_id` selects actual (0, default)
+    vs. projected (1) points -- see _player_week_points."""
     rows = []
     for m in week_raw.get("schedule", []):
         if m.get("matchupPeriodId") != week:
@@ -131,8 +148,13 @@ def extract_player_rows(week_raw, year, week, team_manager, team_name):
                     continue  # not part of the starting lineup this week
 
                 player = entry.get("playerPoolEntry", {}).get("player", {})
-                points = _player_week_points(player, week)
-                if points is None:
+                points = _player_week_points(player, week, stat_source_id)
+                if points is None and stat_source_id == 0:
+                    # Fallback only applies to actual (not projected) reads --
+                    # appliedStatTotal reflects whatever ESPN currently treats
+                    # as "the" total for this roster entry, which is only a
+                    # safe stand-in for the real statSourceId=0 lookup above,
+                    # not necessarily a specific projection.
                     points = entry.get("playerPoolEntry", {}).get("appliedStatTotal")
 
                 rows.append(
@@ -192,7 +214,8 @@ def build_manager_map(raw):
 
 
 def build_matchup_records(raw, year, team_manager):
-    """Returns (matchup_records, played_weeks, live_week, live_pairings).
+    """Returns (matchup_records, played_weeks, live_week, live_pairings,
+    future_pairings_by_week).
 
     matchup_records/played_weeks: unchanged behavior from before -- only
     matchups ESPN has fully decided (winner != "UNDECIDED") are included,
@@ -217,6 +240,14 @@ def build_matchup_records(raw, year, team_manager):
     comment) -- so a live score is never a moving target that later turns
     out to have included some correction that decided weeks don't get
     until the week is actually final.
+
+    future_pairings_by_week: {week: [pairings]} for every OTHER undecided
+    week (i.e. everything after live_week) up through MAX_PROJECTED_WEEK,
+    same pairing shape as live_pairings. ESPN publishes a league's whole
+    schedule up front, so these future pairings are already sitting in
+    raw["schedule"] the same way live_week's are -- this just collects them
+    instead of discarding them. Used by pull_season to build
+    projected_matchup_records for the "Projected Finish" Contests view.
     """
     matchup_records = []
     weeks = set()
@@ -227,27 +258,29 @@ def build_matchup_records(raw, year, team_manager):
 
     live_week = min(undecided_weeks) if undecided_weeks else None
     live_pairings = []
+    future_pairings_by_week = {}
 
     for m in raw.get("schedule", []):
         week = m.get("matchupPeriodId")
         winner = m.get("winner")
 
         if winner == "UNDECIDED":
+            home = m.get("home") or {}
+            away = m.get("away") or {}
+            home_id = home.get("teamId")
+            away_id = away.get("teamId")
+            pairing = {
+                "week": week,
+                "matchup_id": m.get("id"),
+                "home_platform_team_id": home_id,
+                "away_platform_team_id": away_id,
+                "is_bye": away_id is None,
+            }
             if week == live_week:
-                home = m.get("home") or {}
-                away = m.get("away") or {}
-                home_id = home.get("teamId")
-                away_id = away.get("teamId")
-                live_pairings.append(
-                    {
-                        "week": week,
-                        "matchup_id": m.get("id"),
-                        "home_platform_team_id": home_id,
-                        "away_platform_team_id": away_id,
-                        "is_bye": away_id is None,
-                    }
-                )
-            continue  # not decided -- either the live week (handled above) or further out and not started
+                live_pairings.append(pairing)
+            elif week is not None and week <= MAX_PROJECTED_WEEK:
+                future_pairings_by_week.setdefault(week, []).append(pairing)
+            continue  # not decided -- either the live week, a future week (both handled above), or beyond MAX_PROJECTED_WEEK
 
         home = m.get("home") or {}
         away = m.get("away") or {}
@@ -270,7 +303,7 @@ def build_matchup_records(raw, year, team_manager):
                 "is_bye": is_bye,
             }
         )
-    return matchup_records, sorted(weeks), live_week, live_pairings
+    return matchup_records, sorted(weeks), live_week, live_pairings, future_pairings_by_week
 
 
 def build_player_points_rows(league_id, year, weeks, team_manager, team_name, espn_s2, swid):
@@ -301,7 +334,9 @@ def pull_season(conn, league_config, year, external_season_id):
     raw = fetch_league_json(external_season_id, year, espn_s2, swid)
     league_name = raw.get("settings", {}).get("name")
     team_manager, team_name, team_logo = build_manager_map(raw)
-    matchup_records, played_weeks, live_week, live_pairings = build_matchup_records(raw, year, team_manager)
+    matchup_records, played_weeks, live_week, live_pairings, future_pairings_by_week = build_matchup_records(
+        raw, year, team_manager
+    )
     player_rows = build_player_points_rows(
         external_season_id, year, played_weeks, team_manager, team_name, espn_s2, swid
     )
@@ -355,6 +390,57 @@ def pull_season(conn, league_config, year, external_season_id):
             live_matchup_records = []
             live_player_rows = []
 
+    # Beyond the live week (if any), pull PROJECTED per-player points
+    # (statSourceId=1, see extract_player_rows) for every other week ESPN's
+    # schedule already knows about, through MAX_PROJECTED_WEEK -- same
+    # provisional-matchup shape as live_matchup_records above, just spanning
+    # however many future weeks future_pairings_by_week has instead of one.
+    # Wrapped in its own try/except for the same reason as the live block:
+    # a hiccup here is a nice-to-have miss, not worth failing the pull over.
+    projected_matchup_records = []
+    if future_pairings_by_week:
+        try:
+            for week in sorted(future_pairings_by_week):
+                week_raw = fetch_week_boxscore(external_season_id, year, week, espn_s2, swid)
+                week_player_rows = extract_player_rows(
+                    week_raw, year, week, team_manager, team_name, stat_source_id=1
+                )
+                # ESPN only populates real projections once a week gets
+                # close -- a week far enough out comes back with every
+                # player's points as None (no statSourceId=1 entry exists
+                # yet). Skip such a week entirely rather than recording a
+                # misleading 0-0 "projection" for it; it picks up real
+                # numbers automatically on a later run once ESPN turns
+                # projections on for it.
+                if not any(row["points"] is not None for row in week_player_rows):
+                    continue
+
+                points_by_team = {}
+                for row in week_player_rows:
+                    tid = row["platform_team_id"]
+                    points_by_team[tid] = round(points_by_team.get(tid, 0.0) + (row["points"] or 0.0), 2)
+
+                for pairing in future_pairings_by_week[week]:
+                    home_id = pairing["home_platform_team_id"]
+                    away_id = pairing["away_platform_team_id"]
+                    projected_matchup_records.append(
+                        {
+                            "week": pairing["week"],
+                            "matchup_id": pairing["matchup_id"],
+                            "home_platform_team_id": home_id,
+                            "away_platform_team_id": away_id,
+                            "home_points": points_by_team.get(home_id, 0.0),
+                            "away_points": points_by_team.get(away_id) if away_id is not None else None,
+                            "is_bye": pairing["is_bye"],
+                        }
+                    )
+        except Exception as exc:  # noqa: BLE001 -- see comment above
+            print(
+                f"    Could not pull projected weeks {sorted(future_pairings_by_week)}: {exc}",
+                file=sys.stderr,
+            )
+            projected_matchup_records = []
+
     return {
         "platform": PLATFORM,
         "external_id": external_season_id,
@@ -367,4 +453,5 @@ def pull_season(conn, league_config, year, external_season_id):
         "live_week": live_week,
         "live_matchup_records": live_matchup_records,
         "live_player_rows": live_player_rows,
+        "projected_matchup_records": projected_matchup_records,
     }

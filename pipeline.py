@@ -156,6 +156,7 @@ def _pull_one_league(conn, league_cfg, current_season_only=False):
                 data.get("live_matchup_records"),
                 data.get("live_player_rows"),
                 data.get("team_logo"),
+                projected_matchup_records=data.get("projected_matchup_records"),
             )
             reg_weeks = (
                 regular_season_weeks_config.get(year)
@@ -170,9 +171,13 @@ def _pull_one_league(conn, league_cfg, current_season_only=False):
                 if data.get("live_week") is not None
                 else ""
             )
+            projected_records = data.get("projected_matchup_records") or []
+            projected_note = (
+                f", {len(projected_records)} projected team-weeks" if projected_records else ""
+            )
             print(
                 f"    {len(data['player_rows'])} player-week rows, "
-                f"{len(data['matchup_records'])} matchup rows -- loaded{live_note}."
+                f"{len(data['matchup_records'])} matchup rows -- loaded{live_note}{projected_note}."
             )
 
             windows = contests_config.get(year) or contests_config.get(str(year))
