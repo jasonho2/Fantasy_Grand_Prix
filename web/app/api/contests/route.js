@@ -45,16 +45,18 @@ import {
 
 // The *default* placement -> points tables used for the contest_points/
 // rank/rankDelta this route returns are no longer fixed globally -- each
-// league can configure its own default per cup (see web/lib/scoring.js and
-// the `leagues.scoring_config` column), falling back to
-// DEFAULT_POINT_TABLES (plain Solo, no overrides) for any league that never
-// configured one. A viewer can additionally layer a personal override per
-// cup+mode from the "Change Point System" editor on the Grand Prix page --
-// that's a client-side-only preference (see applyCustomScoring in
-// contests/page.js), which is why weekly_rank/weekly_fantasy are also
-// included on every leaderboard row below: they're the raw ingredients the
-// frontend needs to re-derive everything under a custom table without a
-// separate API shape per override.
+// league configures its own default per cup, per SEASON (see
+// web/lib/scoring.js and the `league_seasons.scoring_config` column, set via
+// Manage Leagues' passphrase-gated "Edit Scoring"), falling back to
+// DEFAULT_POINT_TABLES (plain Solo, no overrides) for any season that was
+// never explicitly configured. Scoring used to live on `leagues` (one
+// config for every season a league has ever played) -- moved to
+// league_seasons so editing one season's settings (e.g. this year's) can't
+// silently rewrite an earlier season's (e.g. last year's) leaderboard too.
+// weekly_rank/weekly_fantasy are included on every leaderboard row below as
+// raw diagnostic data (this week's placement and fantasy score, independent
+// of any point table) -- not currently consumed by the frontend, but cheap
+// to include and useful for spot-checking a cup's numbers.
 
 // The two supported Grand Prix cup lengths, viewable via ?cupWeeks=15|16 --
 // independent of season (see below), since the cup leaderboard is already
@@ -91,14 +93,19 @@ export async function GET(request) {
   if (!season || !league) {
     return Response.json({ error: "season and league query params are required" }, { status: 400 });
   }
-  // League-scoped row carrying both the display name and this league's
-  // configured Grand Prix defaults. Selecting cup_weeks/scoring_config here
-  // (rather than a separate query) means a not-yet-migrated DB -- one the
-  // Python pipeline hasn't reconnected to since these columns were added --
-  // fails this whole query and falls back to [] below, same tolerate-missing
-  // pattern used elsewhere in this route (see the live_matchups query).
+  // League-scoped row carrying the display name, this league's cup length
+  // (league-wide -- doesn't vary by season), and THIS season's scoring
+  // config (ls.scoring_config, not l.scoring_config -- see the file-level
+  // comment above). The join is already season-scoped (ls.season = ?), so
+  // pulling scoring_config off `ls` instead of `l` is what actually makes
+  // scoring per-season instead of per-league. Selecting cup_weeks/
+  // scoring_config here (rather than a separate query) means a
+  // not-yet-migrated DB -- one the Python pipeline hasn't reconnected to
+  // since these columns were added -- fails this whole query and falls back
+  // to [] below, same tolerate-missing pattern used elsewhere in this route
+  // (see the live_matchups query).
   const leagueRows = await query(
-    `SELECT COALESCE(l.display_name, ls.league_name) AS name, l.cup_weeks AS cupWeeks, l.scoring_config AS scoringConfigRaw
+    `SELECT COALESCE(l.display_name, ls.league_name) AS name, l.cup_weeks AS cupWeeks, ls.scoring_config AS scoringConfigRaw
      FROM leagues l LEFT JOIN league_seasons ls ON ls.league_id = l.league_id AND ls.season = ?
      WHERE l.slug = ?`,
     [season, league]
@@ -386,11 +393,8 @@ export async function GET(request) {
         fantasy_points: Number(t.fantasy_points.toFixed(2)),
         weekly_points: contestWeeks.map((wk) => t.byWeek[wk]?.placement_points ?? null),
         // Raw weekly placement (1st, 2nd, ...) and raw weekly fantasy score,
-        // independent of any point table -- lets the frontend recompute
-        // weekly_points/contest_points/rank/rankDelta for a custom point
-        // system entirely client-side (see the "Change Point System"
-        // editor in contests/page.js) without needing a new API shape per
-        // custom table.
+        // independent of any point table -- see the file-level comment
+        // above on weekly_rank/weekly_fantasy.
         weekly_rank: contestWeeks.map((wk) => t.byWeek[wk]?.rank ?? null),
         weekly_fantasy: contestWeeks.map((wk) => t.byWeek[wk]?.points ?? null),
       }))
@@ -435,12 +439,10 @@ export async function GET(request) {
       liveWeek: liveWeek != null && liveWeek >= w.start_week && liveWeek <= w.end_week ? liveWeek : null,
       leaderboard: buildLeaderboard(ranked, w, soloTable),
       doubleDashLeaderboard: buildLeaderboard(doubleDashRanked, w, doubleDashTable),
-      // Which mode/table the league configured as this cup's default --
-      // lets the frontend open on that mode and treat that table (not the
-      // plain built-in one) as what "Reset to Default" resets a viewer's
-      // personal override back to (see PointSystemEditor/DEFAULT_POINT_TABLES
-      // usage in contests/page.js) and what the scoring badge next to the
-      // cup title describes.
+      // Which mode/table the league configured as this cup's default (for
+      // this season) -- lets the frontend open on that mode, treat it as
+      // what "Reset to Default" resets the view back to, and describe it in
+      // the scoring badge next to the cup title.
       defaultMode: defaultModeForCup(scoringConfig, i),
       defaultPointTable: { solo: soloTable, doubleDash: doubleDashTable },
     };

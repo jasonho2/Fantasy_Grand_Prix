@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useJson } from "../../../lib/useJson";
 import PointsGrid from "../../components/PointsGrid";
-import { CUP_NAMES, DEFAULT_POINT_TABLES, DEFAULT_CUP_WEEKS } from "../../../lib/scoring";
+import { CUP_NAMES, DEFAULT_POINT_TABLES, DEFAULT_CUP_WEEKS, normalizeCupWeeks } from "../../../lib/scoring";
 
 // A blank (all-"") point-table draft sized for `mode` -- what a fresh
 // CupConfigBox starts with, and what it resets to on a mode switch (the two
@@ -34,12 +34,12 @@ function ModeSelect({ mode, onChange }) {
   );
 }
 
-// One cup's (or, in uniform mode, the whole league's) mode + point-table
+// One cup's (or, in uniform mode, the whole season's) mode + point-table
 // configuration. `config` is { mode, pointTable } where pointTable is a
 // sparse array of strings the same length as DEFAULT_POINT_TABLES[mode] --
-// same shape PointSystemEditor uses on the Contests page (see
-// contests/page.js), just persisted server-side as a league default instead
-// of client-side as a personal override.
+// same shape/resolution rules as web/lib/scoring.js's normalizeScoringConfig,
+// just held here as editable draft state (strings, for controlled inputs)
+// before being packed back into that canonical shape by buildScoringConfig.
 function CupConfigBox({ title, config, onChange }) {
   return (
     <div className="panel" style={{ background: "var(--bg)", marginBottom: 12 }}>
@@ -74,13 +74,46 @@ function CupConfigBox({ title, config, onChange }) {
   );
 }
 
-// The 15/16-week + scoring-format picker shown on the Add League form
-// (before the platform-specific fields' own "Add League" button) and reused
-// as-is for Manage Leagues' "Edit Scoring" action -- same controlled state
-// shape either way, just a different save target (register vs. PATCH).
-function GrandPrixSettings({
-  cupWeeks,
-  onCupWeeksChange,
+// Just the 15/16-week toggle -- league-wide (stored on `leagues`, doesn't
+// vary by season, see db.py), so it's shown once regardless of which
+// season a scoring editor might otherwise be scoped to. Split out from the
+// scoring-format picker below (they used to be one combined component)
+// specifically so Manage Leagues' per-season Edit Scoring can show this
+// once, outside the season picker, instead of implying cup length varies by
+// year the way scoring now does.
+function CupWeeksPicker({ cupWeeks, onChange }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: "block", fontSize: 13, marginBottom: 6 }}>Grand Prix length</label>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          type="button"
+          className={`week-chip${cupWeeks === 15 ? " selected" : ""}`}
+          onClick={() => onChange(15)}
+        >
+          15 weeks
+        </button>
+        <button
+          type="button"
+          className={`week-chip${cupWeeks === 16 ? " selected" : ""}`}
+          onClick={() => onChange(16)}
+        >
+          16 weeks
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// The cup scoring-format picker (uniform vs. per-cup, plus each cup's
+// mode/point table) for ONE season -- deliberately separate from
+// CupWeeksPicker above, since scoring is configured per season (see db.py's
+// league_seasons.scoring_config) while cup length isn't. Add League
+// composes this together with CupWeeksPicker (see GrandPrixSettings below)
+// since there's only ever "the initial season" to configure there; Manage
+// Leagues' Edit Scoring shows CupWeeksPicker once and this scoped to
+// whichever season its own season dropdown currently has selected.
+function ScoringFormatSettings({
   uniform,
   onUniformChange,
   uniformConfig,
@@ -90,26 +123,6 @@ function GrandPrixSettings({
 }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ marginBottom: 14 }}>
-        <label style={{ display: "block", fontSize: 13, marginBottom: 6 }}>Grand Prix length</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            className={`week-chip${cupWeeks === 15 ? " selected" : ""}`}
-            onClick={() => onCupWeeksChange(15)}
-          >
-            15 weeks
-          </button>
-          <button
-            type="button"
-            className={`week-chip${cupWeeks === 16 ? " selected" : ""}`}
-            onClick={() => onCupWeeksChange(16)}
-          >
-            16 weeks
-          </button>
-        </div>
-      </div>
-
       <div style={{ marginBottom: 14 }}>
         <label style={{ display: "block", fontSize: 13, marginBottom: 6 }}>Cup scoring format</label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -148,10 +161,42 @@ function GrandPrixSettings({
       )}
 
       <p style={{ fontSize: 12, color: "var(--text-dim)", margin: "8px 0 0" }}>
-        These become the default scoring shown on the Grand Prix page for this league -- anyone
-        viewing can still switch modes, sort, or set their own personal point overrides, and
-        &quot;Reset to Default&quot; there brings it back to this.
+        These become the default scoring shown on the Grand Prix page for this season -- anyone
+        viewing can still switch modes, sort by a specific week, or view as a chart, and
+        &quot;Reset to Default&quot; there brings the view back to this.
       </p>
+    </div>
+  );
+}
+
+// Add League's combined picker -- cup length + this (the initial) season's
+// scoring format together, shown before either platform's own "Add League"
+// submit button. Just CupWeeksPicker + ScoringFormatSettings composed
+// together; no season picker needed here since registration only ever
+// configures one (implicit) season -- see Manage Leagues' EditScoringForm
+// below for the season-aware version used to edit an already-registered
+// league.
+function GrandPrixSettings({
+  cupWeeks,
+  onCupWeeksChange,
+  uniform,
+  onUniformChange,
+  uniformConfig,
+  onUniformConfigChange,
+  perCupConfig,
+  onPerCupConfigChange,
+}) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <CupWeeksPicker cupWeeks={cupWeeks} onChange={onCupWeeksChange} />
+      <ScoringFormatSettings
+        uniform={uniform}
+        onUniformChange={onUniformChange}
+        uniformConfig={uniformConfig}
+        onUniformConfigChange={onUniformConfigChange}
+        perCupConfig={perCupConfig}
+        onPerCupConfigChange={onPerCupConfigChange}
+      />
     </div>
   );
 }
@@ -171,12 +216,15 @@ function buildScoringConfig({ uniform, uniformConfig, perCupConfig }) {
     : { uniform: false, cups: perCupConfig.map(clean) };
 }
 
-// The reverse of buildScoringConfig -- turns a stored (or absent) league
-// scoringConfig back into GrandPrixSettings' controlled state, e.g. when
-// Manage Leagues' "Edit Scoring" opens for a league that already has
-// defaults set. A stored pointTable entry is `number | null`; drafts want
-// strings (blank for null) since they're controlled <input> values.
-function scoringConfigToState(scoringConfig, cupWeeksValue) {
+// The reverse of buildScoringConfig -- turns a stored (or absent) SEASON's
+// scoringConfig back into ScoringFormatSettings' controlled state, e.g. when
+// Manage Leagues' "Edit Scoring" opens for a league/season that already has
+// defaults set, or when its season dropdown switches to a different season.
+// A stored pointTable entry is `number | null`; drafts want strings (blank
+// for null) since they're controlled <input> values. No cupWeeks in this
+// shape -- that's league-wide, not per-season, and tracked separately (see
+// CupWeeksPicker/EditScoringForm) rather than reloaded on every season switch.
+function scoringConfigToState(scoringConfig) {
   function toDraft(cfg) {
     const mode = cfg?.mode === "doubleDash" ? "doubleDash" : "solo";
     const stored = Array.isArray(cfg?.pointTable) ? cfg.pointTable : null;
@@ -189,7 +237,6 @@ function scoringConfigToState(scoringConfig, cupWeeksValue) {
 
   const uniform = scoringConfig?.uniform !== false;
   return {
-    cupWeeks: cupWeeksValue === 15 ? 15 : DEFAULT_CUP_WEEKS,
     uniform,
     uniformConfig: uniform ? toDraft(scoringConfig) : toDraft(null),
     perCupConfig: CUP_NAMES.map((_, i) => toDraft(!uniform ? scoringConfig?.cups?.[i] : null)),
@@ -199,6 +246,14 @@ function scoringConfigToState(scoringConfig, cupWeeksValue) {
 function SleeperForm({ onDone, cupWeeks, scoringConfig }) {
   const [sleeperLeagueId, setSleeperLeagueId] = useState("");
   const [displayName, setDisplayName] = useState("");
+  // Registration itself stays open (see the page's Sleeper intro text
+  // below) -- but the Grand Prix length/scoring picked above IS the same
+  // commissioner-only decision gated everywhere else on this site, so
+  // submitting it here needs the passphrase too (see api/leagues/route.js's
+  // handleSleeper). Left blank, the league still registers fine, just with
+  // plain defaults instead of whatever was picked above -- there's nothing
+  // to lose by trying, so this field is optional rather than required.
+  const [scoringPassphrase, setScoringPassphrase] = useState("");
   const [status, setStatus] = useState("idle"); // idle | submitting | error
   const [error, setError] = useState(null);
 
@@ -216,6 +271,7 @@ function SleeperForm({ onDone, cupWeeks, scoringConfig }) {
           displayName: displayName.trim(),
           cupWeeks,
           scoringConfig,
+          scoringPassphrase,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -264,6 +320,23 @@ function SleeperForm({ onDone, cupWeeks, scoringConfig }) {
           placeholder="Defaults to the league's name on Sleeper"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
+          style={{ width: "100%" }}
+        />
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <label htmlFor="scoringPassphraseSleeper" style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
+          Grand Prix settings passphrase{" "}
+          <span style={{ color: "var(--text-dim)" }}>
+            (optional -- only needed to save the length/scoring picked above; leave blank to
+            register with plain defaults and set them later via Manage Leagues)
+          </span>
+        </label>
+        <input
+          id="scoringPassphraseSleeper"
+          type="password"
+          value={scoringPassphrase}
+          onChange={(e) => setScoringPassphrase(e.target.value)}
           style={{ width: "100%" }}
         />
       </div>
@@ -514,16 +587,31 @@ function DeleteForm({ league, onDone, onCancel }) {
   );
 }
 
-// Edits a registered league's Grand Prix defaults -- the same
-// GrandPrixSettings picker the Add League form uses, prefilled from
-// whatever this league already has stored (scoringConfigToState), saving
-// via PATCH instead of registering a new league. Lets a league that
-// predates this feature (or whose owner skipped it at import time) get real
-// defaults set for the first time, and lets them be changed again later.
+// Edits a registered league's Grand Prix defaults: CupWeeksPicker (always,
+// league-wide) plus a season dropdown (from league.seasons, defaulting to
+// the most recent) and ScoringFormatSettings scoped to whichever season is
+// selected, reloading its draft state from league.scoringConfigBySeason
+// whenever the selection changes -- scoring is configured per season now
+// (see db.py's league_seasons.scoring_config), so switching seasons here
+// must never carry over another season's unsaved edits. Saving always
+// requires the passphrase (see api/leagues/[slug]/route.js's PATCH comment
+// for why this hard-fails on a wrong one, unlike Add League's Sleeper path,
+// which soft-fails to keep registration open).
 function EditScoringForm({ league, onDone, onCancel }) {
-  const [state, setState] = useState(() => scoringConfigToState(league.scoringConfig, league.cupWeeks));
+  const seasons = league.seasons || [];
+  const [season, setSeason] = useState(() => (seasons.length ? seasons[seasons.length - 1] : null));
+  const [cupWeeks, setCupWeeks] = useState(() => normalizeCupWeeks(league.cupWeeks));
+  const [state, setState] = useState(() =>
+    scoringConfigToState(season != null ? league.scoringConfigBySeason?.[season] : null)
+  );
+  const [passphrase, setPassphrase] = useState("");
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState(null);
+
+  function handleSeasonChange(nextSeason) {
+    setSeason(nextSeason);
+    setState(scoringConfigToState(league.scoringConfigBySeason?.[nextSeason]));
+  }
 
   async function handleSave() {
     setStatus("submitting");
@@ -532,7 +620,12 @@ function EditScoringForm({ league, onDone, onCancel }) {
       const res = await fetch(`/api/leagues/${encodeURIComponent(league.slug)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cupWeeks: state.cupWeeks, scoringConfig: buildScoringConfig(state) }),
+        body: JSON.stringify({
+          season,
+          cupWeeks,
+          scoringConfig: buildScoringConfig(state),
+          passphrase,
+        }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
@@ -543,11 +636,48 @@ function EditScoringForm({ league, onDone, onCancel }) {
     }
   }
 
+  // No season configured yet at all -- happens for a league registered
+  // before this feature existed, or one that just hasn't had a pipeline run
+  // pull any of its seasons yet (see db.py's set_league_season_info, which
+  // is what actually creates a league_seasons row). Nothing to scope a
+  // scoring edit to without at least one season on record.
+  if (seasons.length === 0) {
+    return (
+      <div>
+        <p style={{ color: "var(--text-dim)", fontSize: 13 }}>
+          No seasons found yet for this league -- run the pipeline at least once (or wait for the
+          next scheduled sync) before setting per-season scoring here.
+        </p>
+        <button type="button" className="week-chip" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <GrandPrixSettings
-        cupWeeks={state.cupWeeks}
-        onCupWeeksChange={(cupWeeks) => setState((s) => ({ ...s, cupWeeks }))}
+      <CupWeeksPicker cupWeeks={cupWeeks} onChange={setCupWeeks} />
+
+      <div style={{ marginBottom: 14 }}>
+        <label htmlFor={`season-${league.slug}`} style={{ display: "block", fontSize: 13, marginBottom: 6 }}>
+          Season
+        </label>
+        <select
+          id={`season-${league.slug}`}
+          value={season ?? ""}
+          onChange={(e) => handleSeasonChange(Number(e.target.value))}
+          style={{ width: "100%" }}
+        >
+          {seasons.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <ScoringFormatSettings
         uniform={state.uniform}
         onUniformChange={(uniform) => setState((s) => ({ ...s, uniform }))}
         uniformConfig={state.uniformConfig}
@@ -555,6 +685,21 @@ function EditScoringForm({ league, onDone, onCancel }) {
         perCupConfig={state.perCupConfig}
         onPerCupConfigChange={(perCupConfig) => setState((s) => ({ ...s, perCupConfig }))}
       />
+
+      <div style={{ marginBottom: 14 }}>
+        <label htmlFor={`scoringPassphrase-${league.slug}`} style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
+          Passphrase
+        </label>
+        <input
+          id={`scoringPassphrase-${league.slug}`}
+          type="password"
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
+          required
+          style={{ width: "100%" }}
+        />
+      </div>
+
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button type="button" className="week-chip selected" onClick={handleSave} disabled={status === "submitting"}>
           {status === "submitting" ? "Saving..." : "Save"}
@@ -680,6 +825,13 @@ export default function AddLeaguePage() {
           minutes during the season, or sooner if the site owner triggers one manually) and pulls
           its {result.years ? `${result.years.join(", ")} season(s)` : "full history"} automatically.
         </p>
+        {result.scoringSaved === false && (
+          <p style={{ color: "var(--text-dim)", fontSize: 14 }}>
+            The Grand Prix length/scoring picked above wasn&apos;t saved (missing or incorrect
+            passphrase) -- the league registered with plain defaults instead. Set real values
+            later via Manage Leagues&apos; &quot;Edit Scoring.&quot;
+          </p>
+        )}
         <button
           type="button"
           className="week-chip"

@@ -41,9 +41,14 @@ leagues                 one row per registered league (platform + credentials
 league_seasons          one row per (league, season): that season's
                          platform-side id (ESPN's league id repeats every
                          season; Sleeper's changes every season and is
-                         chained via previous_league_id), display name, and
+                         chained via previous_league_id), display name,
                          regular_season_weeks (drives the standings/playoff
-                         split -- see below).
+                         split -- see below), and scoring_config (that
+                         season's Grand Prix placement->points scoring --
+                         deliberately per-season, not per-league, since a
+                         league's point system can change year to year and
+                         each season's leaderboard must keep reflecting
+                         whatever was configured for that specific year).
 managers                one row per real person within a league (identified
                          by platform display name), scoped by league_id so
                          the same name in two different leagues doesn't merge.
@@ -149,9 +154,15 @@ CREATE TABLE IF NOT EXISTS leagues (
     cup_weeks INTEGER,                    -- 15 or 16 -- this league's configured Grand Prix cup length,
                                           -- used as the Contests page's default (still overridable live
                                           -- via ?cupWeeks). NULL means "16, never explicitly configured."
-    scoring_config TEXT,                 -- JSON -- this league's configured default placement->points
-                                          -- scoring per cup (see web/lib/scoring.js). NULL means "plain
-                                          -- Solo, no overrides, for every cup."
+                                          -- League-wide, not per-season -- cup length doesn't vary by year.
+    scoring_config TEXT,                 -- SUPERSEDED by league_seasons.scoring_config below -- scoring is
+                                          -- now configured per season, not once for the whole league (a
+                                          -- league's point system can change year to year, and this
+                                          -- column had no way to represent that: editing it always
+                                          -- retroactively changed every season's leaderboard, including
+                                          -- past ones). Left in place harmlessly for any old row that
+                                          -- still has a value, but no application code reads or writes it
+                                          -- anymore -- see league_seasons.scoring_config instead.
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -169,6 +180,14 @@ CREATE TABLE IF NOT EXISTS league_seasons (
     -- exposes this reliably enough to auto-detect, so it's configured
     -- per league/season.
     regular_season_weeks INTEGER,
+    scoring_config TEXT,                 -- JSON -- THIS season's configured default placement->points
+                                          -- scoring per cup (see web/lib/scoring.js). NULL means "plain
+                                          -- Solo, no overrides, for every cup" -- this season was never
+                                          -- explicitly configured (or predates this column). Deliberately
+                                          -- scoped per (league_id, season) rather than living on leagues,
+                                          -- since a league's scoring can legitimately change year to year
+                                          -- and each season's leaderboard must keep reflecting whatever
+                                          -- was configured for that specific year.
     UNIQUE(league_id, season)
 );
 CREATE INDEX IF NOT EXISTS idx_league_seasons_league ON league_seasons(league_id);
@@ -378,7 +397,21 @@ COLUMN_MIGRATIONS = [
     # api/contests/route.js treats NULL the same as "16 weeks, plain Solo,
     # no point overrides."
     ("leagues", "cup_weeks", "INTEGER"),
+    # SUPERSEDED -- see the SCHEMA_SQL comment on leagues.scoring_config and
+    # the league_seasons.scoring_config entry just below. Kept here (rather
+    # than deleted) purely so a database that predates BOTH this column and
+    # the per-season one still gets leagues.scoring_config added on connect,
+    # matching what SCHEMA_SQL declares -- no application code reads or
+    # writes it going forward.
     ("leagues", "scoring_config", "TEXT"),
+    # Per-season Grand Prix scoring (see the SCHEMA_SQL comment on
+    # league_seasons.scoring_config above). Replaces leagues.scoring_config,
+    # which applied one point system to every season a league has ever
+    # played -- wrong as soon as a league's scoring changes year to year,
+    # since editing it would silently rewrite past seasons' leaderboards
+    # too. NULL for any season never explicitly configured; api/contests/
+    # route.js treats that the same as "plain Solo, no point overrides."
+    ("league_seasons", "scoring_config", "TEXT"),
 ]
 
 

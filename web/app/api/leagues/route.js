@@ -22,17 +22,29 @@ import { normalizeCupWeeks, normalizeScoringConfig } from "@/lib/scoring";
 // here that config.json doesn't already cover and pulls it (see
 // pipeline.py's docstring).
 //
-// Both platforms also accept the same two optional Grand Prix defaults,
-// set from the "Grand Prix settings" picker on the Add League form (see
+// Both platforms also accept the same two optional Grand Prix defaults, set
+// from the "Grand Prix settings" picker on the Add League form (see
 // web/lib/scoring.js for the JSON shape/resolution rules, and
 // web/app/leagues/new/page.js for the UI): `cupWeeks` (15 or 16, defaults to
-// 16) and `scoringConfig` (this league's default placement->points scoring
-// per cup, defaults to plain Solo with no overrides). Both are also
-// editable later via PATCH /api/leagues/<slug> (see that route's own
-// comment) -- registering a league doesn't lock them in forever.
+// 16 -- league-wide, stored on `leagues`, doesn't vary by season) and
+// `scoringConfig` (this league's default placement->points scoring per cup
+// FOR THE INITIAL SEASON being registered, defaults to plain Solo with no
+// overrides -- stored per-season on `league_seasons`, see db.py). Both are
+// also editable later via PATCH /api/leagues/<slug> (see that route's own
+// comment) -- registering a league doesn't lock them in forever, and later
+// seasons get their own independent scoring config there too.
+//
+// Grand Prix settings are a commissioner-only decision, so submitting them
+// (on EITHER platform) requires the same shared passphrase used everywhere
+// else on this route/PATCH/DELETE (`passphrase` for ESPN's request as a
+// whole; a separate `scoringPassphrase` field for Sleeper, since Sleeper
+// registration itself must stay open -- see handleSleeper). Getting it wrong
+// doesn't fail the registration -- it silently registers with plain
+// defaults instead, and the response's `scoringSaved` flag reports whether
+// the submitted settings actually took.
 //
 // POST /api/leagues
-//   Sleeper: { platform: "sleeper", sleeperLeagueId, displayName?, cupWeeks?, scoringConfig? }
+//   Sleeper: { platform: "sleeper", sleeperLeagueId, displayName?, cupWeeks?, scoringConfig?, scoringPassphrase? }
 //   ESPN:    { platform: "espn", espnLeagueId, espnS2?, espnSwid?, years?, displayName?, passphrase, cupWeeks?, scoringConfig? }
 
 function slugify(base) {
@@ -57,15 +69,15 @@ async function reserveSlug(baseSlug, matchesExisting) {
   return slug;
 }
 
-// Registers/updates a league row, tolerating a not-yet-migrated DB that
-// lacks the cup_weeks/scoring_config columns (added well after this table
-// first shipped -- see db.py's COLUMN_MIGRATIONS). Those columns only exist
-// once the Python pipeline has reconnected at least once since they were
-// added; until then, this falls back to the pre-existing INSERT shape
-// rather than 500ing on every new league registration in the meantime --
-// the Grand Prix defaults just don't stick yet, and can be set again later
-// via Manage Leagues once the pipeline has caught up.
-async function upsertLeague({ platform, slug, displayName, sleeperLeagueId, espnFields, cupWeeks, scoringConfig }) {
+// Registers/updates a league row -- cup_weeks only (league-wide; scoring is
+// no longer stored here, see upsertSeasonScoring below and db.py's comment
+// on leagues.scoring_config being superseded). Tolerates a not-yet-migrated
+// DB that lacks the cup_weeks column (added well after this table first
+// shipped -- see db.py's COLUMN_MIGRATIONS): falls back to the pre-existing
+// INSERT shape rather than 500ing on every new league registration in the
+// meantime -- the cup-length default just doesn't stick yet, and can be set
+// again later via Manage Leagues once the pipeline has caught up.
+async function upsertLeague({ platform, slug, displayName, sleeperLeagueId, espnFields, cupWeeks }) {
   const isEspn = platform === "espn";
   const baseCols = isEspn
     ? ["platform", "slug", "display_name", "espn_league_id", "espn_s2", "espn_swid", "pull_years"]
@@ -79,20 +91,45 @@ async function upsertLeague({ platform, slug, displayName, sleeperLeagueId, espn
 
   try {
     await query(
-      `INSERT INTO leagues (${baseCols.join(", ")}, cup_weeks, scoring_config)
-       VALUES (${baseCols.map(() => "?").join(", ")}, ?, ?)
-       ON CONFLICT(slug) DO UPDATE SET ${baseUpdates}, cup_weeks = excluded.cup_weeks, scoring_config = excluded.scoring_config`,
-      [...baseVals, cupWeeks, JSON.stringify(scoringConfig)]
+      `INSERT INTO leagues (${baseCols.join(", ")}, cup_weeks)
+       VALUES (${baseCols.map(() => "?").join(", ")}, ?)
+       ON CONFLICT(slug) DO UPDATE SET ${baseUpdates}, cup_weeks = excluded.cup_weeks`,
+      [...baseVals, cupWeeks]
     );
     return true;
   } catch (err) {
-    console.error("Insert with cup_weeks/scoring_config failed, falling back (DB likely not yet migrated):", err);
+    console.error("Insert with cup_weeks failed, falling back (DB likely not yet migrated):", err);
     await query(
       `INSERT INTO leagues (${baseCols.join(", ")})
        VALUES (${baseCols.map(() => "?").join(", ")})
        ON CONFLICT(slug) DO UPDATE SET ${baseUpdates}`,
       baseVals
     );
+    return false;
+  }
+}
+
+// Upserts THIS season's scoring config for a league into league_seasons
+// (see db.py's league_seasons.scoring_config comment for why scoring lives
+// per-season rather than per-league). Pre-inserts a partial row (just
+// league_id + season + scoring_config) when the pipeline hasn't created one
+// for this season yet -- safe because db.py's set_league_season_info only
+// ever touches external_id/league_name/regular_season_weeks in its own
+// upsert's DO UPDATE SET, so a scoring_config value set here first survives
+// untouched whenever the pipeline does get around to this season. Tolerates
+// a not-yet-migrated DB the same way upsertLeague does -- logs and no-ops
+// rather than failing the whole registration/edit over a missing column.
+async function upsertSeasonScoring(slug, season, scoringConfig) {
+  try {
+    await query(
+      `INSERT INTO league_seasons (league_id, season, scoring_config)
+       VALUES ((SELECT league_id FROM leagues WHERE slug = ?), ?, ?)
+       ON CONFLICT(league_id, season) DO UPDATE SET scoring_config = excluded.scoring_config`,
+      [slug, season, JSON.stringify(scoringConfig)]
+    );
+    return true;
+  } catch (err) {
+    console.error(`upsertSeasonScoring(${slug}, ${season}) failed (DB likely not yet migrated):`, err);
     return false;
   }
 }
@@ -155,12 +192,38 @@ async function handleSleeper(body) {
   const displayName = requestedDisplayName || sleeperLeague.name || null;
   const baseSlug = slugify(displayName || `sleeper-${sleeperLeagueId}`) || `sleeper-${sleeperLeagueId}`;
   const slug = await reserveSlug(baseSlug, (row) => row.sleeper_league_id === sleeperLeagueId);
-  const cupWeeks = normalizeCupWeeks(body?.cupWeeks);
-  const scoringConfig = normalizeScoringConfig(body?.scoringConfig);
+  // Sleeper's own API reports which season this league id currently belongs
+  // to -- used as the season Grand Prix settings below get saved against,
+  // with no need to ask the registering visitor for it.
+  const season = Number(sleeperLeague.season) || new Date().getFullYear();
 
-  await upsertLeague({ platform: "sleeper", slug, displayName, sleeperLeagueId, cupWeeks, scoringConfig });
+  // Sleeper registration itself must stay fully open (see file-level
+  // comment) -- but Grand Prix settings (cup length + scoring) are the same
+  // commissioner-only decision here as everywhere else, so they still need
+  // the shared passphrase. Rather than blocking registration over it, a
+  // wrong/missing passphrase just silently registers the league with plain
+  // defaults instead of whatever was submitted -- the commissioner can
+  // always set real values afterward via Manage Leagues (which hard-fails
+  // instead, since editing scoring is that form's entire purpose).
+  const requestedScoring = body?.cupWeeks !== undefined || body?.scoringConfig !== undefined;
+  const scoringAuthorized = passphraseOk(body?.scoringPassphrase);
+  const cupWeeks = normalizeCupWeeks(scoringAuthorized ? body?.cupWeeks : null);
+  const scoringConfig = normalizeScoringConfig(scoringAuthorized ? body?.scoringConfig : null);
 
-  return Response.json({ slug, displayName: displayName || slug, cupWeeks, scoringConfig });
+  await upsertLeague({ platform: "sleeper", slug, displayName, sleeperLeagueId, cupWeeks });
+  await upsertSeasonScoring(slug, season, scoringConfig);
+
+  return Response.json({
+    slug,
+    displayName: displayName || slug,
+    season,
+    cupWeeks,
+    scoringConfig,
+    // Tells the form whether its submitted Grand Prix settings actually
+    // took, so it can say so, rather than silently showing plain defaults
+    // back with no explanation of why they don't match what was entered.
+    scoringSaved: !requestedScoring || scoringAuthorized,
+  });
 }
 
 async function handleEspn(body) {
@@ -215,6 +278,12 @@ async function handleEspn(body) {
   const slug = await reserveSlug(baseSlug, (row) => String(row.espn_league_id) === espnLeagueId);
   const cupWeeks = normalizeCupWeeks(body?.cupWeeks);
   const scoringConfig = normalizeScoringConfig(body?.scoringConfig);
+  // Grand Prix settings get saved against the most recent requested season
+  // (same `checkYear` already used to validate the league/cookies above) --
+  // no separate passphrase needed for this, since the top-of-function
+  // passphraseOk(body?.passphrase) check already gates this entire request,
+  // scoring settings included.
+  const season = checkYear;
 
   await upsertLeague({
     platform: "espn",
@@ -227,10 +296,10 @@ async function handleEspn(body) {
       pullYearsJson: JSON.stringify(pullYears),
     },
     cupWeeks,
-    scoringConfig,
   });
+  await upsertSeasonScoring(slug, season, scoringConfig);
 
-  return Response.json({ slug, displayName: displayName || slug, years: pullYears, cupWeeks, scoringConfig });
+  return Response.json({ slug, displayName: displayName || slug, years: pullYears, season, cupWeeks, scoringConfig });
 }
 
 export async function POST(request) {
@@ -258,39 +327,66 @@ export async function POST(request) {
 // GET tells the form whether the ESPN path is even enabled on this
 // deployment, so it can hide/disable those fields instead of letting
 // someone fill out a form that can only ever 401. Also returns the current
-// league list (including each one's Grand Prix defaults, so Manage
-// Leagues' "Edit Scoring" action can prefill the same picker the Add League
-// form uses), so the "Manage Leagues" section on the same page can list
-// rename/delete/edit-scoring controls without a second round trip to
-// /api/meta.
+// league list -- each one's league-wide cup length, plus every season
+// that's been configured/pulled at all (`seasons`) and that season's own
+// scoring config (`scoringConfigBySeason`, keyed by season number) -- so
+// the "Manage Leagues" section on the same page can list rename/delete
+// controls and a per-season "Edit Scoring" picker without a second round
+// trip to /api/meta. Scoring genuinely varies by season now (see db.py's
+// league_seasons.scoring_config comment), which is why it's shaped as a
+// per-season map here instead of one value per league.
 export async function GET() {
   // Tries the full column list first; falls back to the pre-existing
-  // (narrower) SELECT if cup_weeks/scoring_config don't exist yet on this
-  // DB (see upsertLeague's comment above) -- a not-yet-migrated DB should
-  // still list leagues normally for rename/delete, just without scoring
-  // defaults to prefill, rather than breaking the whole Manage Leagues
+  // (narrower) SELECT if cup_weeks doesn't exist yet on this DB (see
+  // upsertLeague's comment above) -- a not-yet-migrated DB should still
+  // list leagues normally for rename/delete, just without a cup-length
+  // default to prefill, rather than breaking the whole Manage Leagues
   // section outright.
   let leagues = await query(
-    "SELECT slug, display_name AS displayName, platform, cup_weeks AS cupWeeks, scoring_config AS scoringConfigRaw FROM leagues ORDER BY slug"
+    "SELECT slug, display_name AS displayName, platform, cup_weeks AS cupWeeks FROM leagues ORDER BY slug"
   ).catch(() => null);
   if (leagues === null) {
     leagues = await query("SELECT slug, display_name AS displayName, platform FROM leagues ORDER BY slug").catch(
       () => [] // tolerate a not-yet-migrated DB that lacks the leagues table entirely
     );
   }
-  leagues = leagues.map((l) => {
+
+  // Every (league, season) row that exists at all -- a season shows up here
+  // once the pipeline has pulled it even once (see db.py's
+  // set_league_season_info), regardless of whether its scoring_config has
+  // ever been explicitly set. Tolerant of a not-yet-migrated DB missing
+  // league_seasons.scoring_config, or even the whole league_seasons table
+  // on a very old DB -- falls back to no seasons rather than breaking the
+  // whole Manage Leagues section.
+  const seasonRows = await query(
+    `SELECT l.slug AS slug, ls.season AS season, ls.scoring_config AS scoringConfigRaw
+     FROM league_seasons ls JOIN leagues l ON l.league_id = ls.league_id
+     ORDER BY l.slug, ls.season`
+  ).catch(() => []);
+
+  const seasonsBySlug = new Map();
+  for (const row of seasonRows) {
+    if (!seasonsBySlug.has(row.slug)) seasonsBySlug.set(row.slug, []);
     let scoringConfig = null;
     try {
-      scoringConfig = l.scoringConfigRaw ? JSON.parse(l.scoringConfigRaw) : null;
+      scoringConfig = row.scoringConfigRaw ? JSON.parse(row.scoringConfigRaw) : null;
     } catch {
       scoringConfig = null;
     }
+    seasonsBySlug.get(row.slug).push({ season: row.season, scoringConfig });
+  }
+
+  leagues = leagues.map((l) => {
+    const seasonEntries = seasonsBySlug.get(l.slug) || [];
+    const scoringConfigBySeason = {};
+    for (const e of seasonEntries) scoringConfigBySeason[e.season] = e.scoringConfig;
     return {
       slug: l.slug,
       displayName: l.displayName,
       platform: l.platform,
       cupWeeks: normalizeCupWeeks(l.cupWeeks),
-      scoringConfig,
+      seasons: seasonEntries.map((e) => e.season),
+      scoringConfigBySeason,
     };
   });
 

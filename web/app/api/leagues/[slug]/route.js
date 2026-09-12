@@ -2,29 +2,35 @@ import { timingSafeEqual } from "node:crypto";
 import { query } from "@/lib/db";
 import { normalizeCupWeeks, normalizeScoringConfig } from "@/lib/scoring";
 
-// Rename (open), edit Grand Prix scoring defaults (open), and delete
-// (passphrase-gated) an existing league.
+// Rename (open), edit Grand Prix scoring defaults (passphrase-gated), and
+// delete (passphrase-gated) an existing league.
 //
-// PATCH /api/leagues/<slug>  { displayName? }  and/or  { cupWeeks?, scoringConfig? }
+// PATCH /api/leagues/<slug>  { displayName? }  and/or  { season, cupWeeks?, scoringConfig?, passphrase }
 // DELETE /api/leagues/<slug> { passphrase }
 //
-// Renaming and editing scoring defaults are both purely cosmetic/display
-// preferences -- no credentials or destructive action involved, so they're
-// open the same way Sleeper self-service registration is. A request can
-// include either field group, both, or neither field from the other group;
-// at least one recognized field is required. cupWeeks/scoringConfig use the
-// same shape/validation as registration (see web/lib/scoring.js and
-// api/leagues/route.js's upsertLeague) -- this is how a league registered
-// before this feature existed (or whose owner skipped it at import time)
-// gets real Grand Prix defaults set for the first time, and how they're
-// changed later.
+// Renaming is a purely cosmetic/display preference -- no credentials or
+// destructive action involved, so it stays open the same way Sleeper
+// self-service registration is. Editing Grand Prix scoring is NOT open,
+// unlike a plain rename: it's the same commissioner-only decision gated
+// everywhere else on this site, and this is that decision's dedicated,
+// sole-purpose form -- so unlike registration's softer "wrong passphrase
+// silently falls back to defaults" behavior, a wrong/missing passphrase
+// here hard-fails with 401, exactly like DELETE below. A request can
+// include the displayName field, the scoring field group, or both; the
+// scoring group requires `season` (which season's config this edits -- see
+// db.py's league_seasons.scoring_config for why scoring is per-season, not
+// per-league) plus `passphrase`, in addition to at least one of cupWeeks/
+// scoringConfig. cupWeeks/scoringConfig use the same shape/validation as
+// registration (see web/lib/scoring.js and api/leagues/route.js's
+// upsertLeague/upsertSeasonScoring) -- this is how a season's Grand Prix
+// defaults get set for the first time, or changed later.
 //
 // Deleting is destructive and irreversible (every team/matchup/weekly
 // score/contest result for that league, gone), and this site still has no
 // login to otherwise restrict it to "your own" league -- so it reuses the
-// same ADD_LEAGUE_PASSPHRASE gate as ESPN registration. If that env var
-// isn't set, deletion is disabled outright, same reasoning as the ESPN
-// add-league path.
+// same ADD_LEAGUE_PASSPHRASE gate as ESPN registration and scoring edits.
+// If that env var isn't set, deletion (and scoring edits) are disabled
+// outright, same reasoning as the ESPN add-league path.
 
 function passphraseOk(submitted) {
   const expected = process.env.ADD_LEAGUE_PASSPHRASE;
@@ -44,11 +50,28 @@ export async function PATCH(request, context) {
   // partial-update ambiguity between them; presence of either one in the
   // body means "update both."
   const hasScoring = body && (body.cupWeeks !== undefined || body.scoringConfig !== undefined);
+  const season = Number(body?.season);
 
   if (!displayName && !hasScoring) {
     return Response.json(
       { error: "Nothing to update -- send a non-empty displayName and/or cupWeeks/scoringConfig." },
       { status: 400 }
+    );
+  }
+  if (hasScoring && !Number.isInteger(season)) {
+    return Response.json(
+      { error: "Editing Grand Prix scoring requires a season (which year's config this changes)." },
+      { status: 400 }
+    );
+  }
+  // Editing scoring is gated the same way DELETE is below -- unlike
+  // renaming, which stays open (see file-level comment). Checked before
+  // touching the database so a wrong passphrase can't even partially apply
+  // (e.g. renaming while also silently rejecting the scoring half).
+  if (hasScoring && !passphraseOk(body?.passphrase)) {
+    return Response.json(
+      { error: "Incorrect passphrase, or scoring edits aren't enabled on this deployment." },
+      { status: 401 }
     );
   }
 
@@ -66,14 +89,23 @@ export async function PATCH(request, context) {
     if (hasScoring) {
       const cupWeeks = normalizeCupWeeks(body.cupWeeks);
       const scoringConfig = normalizeScoringConfig(body.scoringConfig);
-      // No upsertLeague-style fallback here (unlike registration) -- if
-      // these columns don't exist yet on this DB, surfacing a real error is
-      // more useful than silently pretending the edit took effect.
-      await query("UPDATE leagues SET cup_weeks = ?, scoring_config = ? WHERE slug = ?", [
-        cupWeeks,
-        JSON.stringify(scoringConfig),
-        slug,
-      ]);
+      // cup_weeks is league-wide (unchanged from before) -- still lives on
+      // `leagues`, still has no fallback here (unlike registration's
+      // upsertLeague): if this column doesn't exist yet on this DB,
+      // surfacing a real error is more useful than silently pretending the
+      // edit took effect.
+      await query("UPDATE leagues SET cup_weeks = ? WHERE slug = ?", [cupWeeks, slug]);
+      // scoringConfig, by contrast, is scoped to the specific `season` this
+      // request named -- upserted into league_seasons rather than written
+      // to leagues.scoring_config (superseded, see db.py), so editing one
+      // season's scoring never touches any other season's leaderboard.
+      await query(
+        `INSERT INTO league_seasons (league_id, season, scoring_config)
+         VALUES ((SELECT league_id FROM leagues WHERE slug = ?), ?, ?)
+         ON CONFLICT(league_id, season) DO UPDATE SET scoring_config = excluded.scoring_config`,
+        [slug, season, JSON.stringify(scoringConfig)]
+      );
+      result.season = season;
       result.cupWeeks = cupWeeks;
       result.scoringConfig = scoringConfig;
     }
