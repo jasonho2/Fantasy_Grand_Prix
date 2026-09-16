@@ -161,6 +161,38 @@ def _blended_player_week_points(player, week):
     return _player_week_points(player, week, stat_source_id=1)
 
 
+def _week_has_started(week_raw, week):
+    """True once ESPN has recorded at least one real (statSourceId=0) stat
+    entry for this scoringPeriodId -- i.e. at least one player's actual NFL
+    game has started this week, even if it just kicked off and nobody has
+    scored yet (an entry existing with value 0 still counts, same "played,
+    not just not-happened-yet" philosophy as _blended_player_week_points
+    above). False during the gap between the previous week going final and
+    this week's first real game (Thursday, typically): ESPN's schedule
+    already marks the new matchup period UNDECIDED -- and build_matchup_records
+    already picks it as live_week -- as soon as the old week decides, which
+    happens days before any actual stats exist for the new one. Checked
+    against the raw stats array directly rather than a parsed row's `points`
+    value, since extract_player_rows falls back to appliedStatTotal for a
+    plain actual read when no statSourceId=0 entry exists yet -- that
+    fallback would make a not-yet-started week look like it already has
+    points."""
+    for m in week_raw.get("schedule", []):
+        if m.get("matchupPeriodId") != week:
+            continue
+        for side in ("home", "away"):
+            team_data = m.get(side)
+            if not team_data:
+                continue
+            roster = team_data.get("rosterForCurrentScoringPeriod") or {}
+            for entry in roster.get("entries", []):
+                player = entry.get("playerPoolEntry", {}).get("player", {})
+                for stat in player.get("stats", []):
+                    if stat.get("scoringPeriodId") == week and stat.get("statSourceId") == 0:
+                        return True
+    return False
+
+
 def extract_player_rows(week_raw, year, week, team_manager, team_name, stat_source_id=0, points_fn=None):
     """Parse a single week's boxscore payload into one row per starting-lineup
     player (bench/IR excluded). `stat_source_id` selects actual (0, default)
@@ -386,8 +418,25 @@ def pull_season(conn, league_config, year, external_season_id):
     # If a week is currently being played, pull its boxscore too (a second,
     # separate fetch -- not part of played_weeks/player_rows above, which
     # stays scoped to fully decided weeks exactly like before) and turn it
-    # into provisional live_matchup_records for that one week. Wrapped in
-    # its own try/except: a live pull is a nice-to-have on top of the
+    # into provisional live_matchup_records for that one week. Fetched once
+    # here and reused below for both the real (pure-actual) live pull and
+    # the blended Projected Finish pull, rather than each fetching its own
+    # copy of the same boxscore.
+    #
+    # ESPN marks the new matchup period UNDECIDED (so build_matchup_records
+    # picks it as live_week) the moment the previous week's own last game
+    # goes final -- typically Monday night -- which is days before this new
+    # week's own first game actually kicks off (typically Thursday). Pulling
+    # actual points for it during that gap would show every team at 0 (or,
+    # via extract_player_rows' appliedStatTotal fallback, some stale/
+    # projection-shaped number) as if the week were already in progress. So
+    # live_matchup_records/live_player_rows additionally require
+    # _week_has_started -- at least one real statSourceId=0 stat entry
+    # recorded for this scoring period, meaning some real NFL game in it has
+    # actually kicked off -- before actual points are pulled for this week at
+    # all; until then this function reports no live week's worth of actual
+    # data, same as during the preseason gap before week 1. Wrapped in its
+    # own try/except: a live pull is a nice-to-have on top of the
     # decided-week data this function already reliably returns, so a
     # transient hiccup fetching the in-progress boxscore (e.g. ESPN briefly
     # erroring mid-game) should never take down the whole season's pull --
@@ -398,49 +447,61 @@ def pull_season(conn, league_config, year, external_season_id):
     # around (not just aggregated into live_points_by_team below) so
     # load_season can also write them into live_player_points at per-player
     # granularity, for Players & Positions. Initialized empty here so a
-    # failed/skipped live pull always returns a valid (empty) list rather
-    # than leaving this undefined.
+    # failed/skipped/not-yet-started live pull always returns a valid
+    # (empty) list rather than leaving this undefined.
     live_player_rows = []
+    live_week_raw = None
+    live_week_started = False
     if live_week is not None and live_pairings:
         try:
-            live_player_rows = build_player_points_rows(
-                external_season_id, year, [live_week], team_manager, team_name, espn_s2, swid
-            )
-            live_points_by_team = {}
-            for row in live_player_rows:
-                tid = row["platform_team_id"]
-                live_points_by_team[tid] = round(
-                    live_points_by_team.get(tid, 0.0) + (row["points"] or 0.0), 2
-                )
-
-            for pairing in live_pairings:
-                home_id = pairing["home_platform_team_id"]
-                away_id = pairing["away_platform_team_id"]
-                live_matchup_records.append(
-                    {
-                        "week": pairing["week"],
-                        "matchup_id": pairing["matchup_id"],
-                        "home_platform_team_id": home_id,
-                        "away_platform_team_id": away_id,
-                        "home_points": live_points_by_team.get(home_id, 0.0),
-                        "away_points": live_points_by_team.get(away_id) if away_id is not None else None,
-                        "is_bye": pairing["is_bye"],
-                    }
-                )
+            live_week_raw = fetch_week_boxscore(external_season_id, year, live_week, espn_s2, swid)
+            live_week_started = _week_has_started(live_week_raw, live_week)
         except Exception as exc:  # noqa: BLE001 -- see comment above
-            print(f"    Could not pull live week {live_week}: {exc}", file=sys.stderr)
-            live_matchup_records = []
-            live_player_rows = []
+            print(f"    Could not pull live week {live_week} boxscore: {exc}", file=sys.stderr)
+            live_week_raw = None
+
+        if live_week_raw is not None and live_week_started:
+            try:
+                live_player_rows = extract_player_rows(live_week_raw, year, live_week, team_manager, team_name)
+                live_points_by_team = {}
+                for row in live_player_rows:
+                    tid = row["platform_team_id"]
+                    live_points_by_team[tid] = round(
+                        live_points_by_team.get(tid, 0.0) + (row["points"] or 0.0), 2
+                    )
+
+                for pairing in live_pairings:
+                    home_id = pairing["home_platform_team_id"]
+                    away_id = pairing["away_platform_team_id"]
+                    live_matchup_records.append(
+                        {
+                            "week": pairing["week"],
+                            "matchup_id": pairing["matchup_id"],
+                            "home_platform_team_id": home_id,
+                            "away_platform_team_id": away_id,
+                            "home_points": live_points_by_team.get(home_id, 0.0),
+                            "away_points": live_points_by_team.get(away_id) if away_id is not None else None,
+                            "is_bye": pairing["is_bye"],
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001 -- see comment above
+                print(f"    Could not build live week {live_week} actuals: {exc}", file=sys.stderr)
+                live_matchup_records = []
+                live_player_rows = []
 
     # The live week's own contribution to "Projected Finish": points already
     # earned by anyone who's already played this week, PLUS this platform's
     # own projection for anyone who hasn't played yet -- see
     # _blended_player_week_points for exactly why that's not the same as
     # live_matchup_records above (which stays pure-actual, for the real
-    # leaderboard). Reuses live_pairings (same live week, same pairings) but
-    # re-fetches the boxscore and re-extracts with the blended point
-    # function instead of reusing live_player_rows, since those were built
-    # with a plain actual-only read. A user reported Projected Finish
+    # leaderboard). Reuses live_week_raw fetched above instead of re-fetching
+    # the same boxscore -- unlike live_matchup_records above, this doesn't
+    # require live_week_started: before the first game, every player simply
+    # has no statSourceId=0 entry yet, so _blended_player_week_points falls
+    # straight through to each player's statSourceId=1 projection for all of
+    # them, giving the same "pure projection" result a genuinely future week
+    # gets below -- exactly what a viewer wants Projected Finish to show for
+    # the imminent week during that gap. A user reported Projected Finish
     # reading far lower than ESPN's own displayed projected total; this
     # turned out to be the entire gap -- the live week was previously
     # missing from projected_matchups altogether, so Projected Finish fell
@@ -451,9 +512,8 @@ def pull_season(conn, league_config, year, external_season_id):
     # Finish doesn't have a live-week number yet, not that the whole pull
     # should fail.
     projected_matchup_records = []
-    if live_week is not None and live_pairings:
+    if live_week is not None and live_pairings and live_week_raw is not None:
         try:
-            live_week_raw = fetch_week_boxscore(external_season_id, year, live_week, espn_s2, swid)
             blended_rows = extract_player_rows(
                 live_week_raw, year, live_week, team_manager, team_name,
                 points_fn=_blended_player_week_points,
