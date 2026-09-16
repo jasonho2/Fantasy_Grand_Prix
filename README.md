@@ -235,6 +235,31 @@ one league/season is skipped with a warning in the run's log instead of
 failing the whole job -- every other league/season still gets pulled and
 committed.
 
+## Weekly recap
+
+A written recap of each week's matchups can be posted above the Contests
+page's leaderboard and archived on the **Weekly Report** page. It's off by
+default per league -- turn it on for a league via **Manage Leagues** (in
+the Leagues nav link) or when first registering it, and it'll start
+showing up once something posts one.
+
+This site doesn't generate recaps itself -- there's no LLM call anywhere
+in `pipeline.py` or the Next.js app. Instead, `POST /api/recaps` is a
+narrow write endpoint meant for an external automation (e.g. a scheduled
+AI agent task) to call once a week, after that week's games are final,
+with a drafted recap for whichever league(s) have `recaps_enabled` set.
+Gated behind its own env var:
+
+| Variable | Value |
+| --- | --- |
+| `RECAP_API_KEY` | a random secret of your choosing, separate from `ADD_LEAGUE_PASSPHRASE` -- meant to live in an automation's own stored config, not typed by a person each time |
+
+Leave `RECAP_API_KEY` unset to disable recap posting entirely (`GET
+/api/recaps` still works either way -- it's read-only and unauthenticated,
+same as every other data endpoint on this site). See
+`web/app/api/recaps/route.js` for the request shape and
+`db.py`'s `weekly_recaps`/`leagues.recaps_enabled` comments for the schema.
+
 ## Adding, renaming, and removing leagues
 
 Both platforms can be self-serviced through **Leagues** in the nav, but

@@ -110,6 +110,33 @@ const CUP_ICONS = {
   "Special Cup": "\u{1F451}", // crown
 };
 
+// One written recap of the most recently finished week, shown above the
+// active cup panel(s) -- see api/recaps/route.js and db.py's weekly_recaps
+// comment. Written by an automated weekly task, not by anything on this
+// page; this just renders whatever's already there (if the league has the
+// feature enabled and at least one week has been recapped) and renders
+// nothing otherwise, same "absence just means don't show it" pattern as
+// the empty-state checks below. `body` is stored as plain text with blank
+// lines between paragraphs -- split and rendered as separate <p> tags
+// rather than dumped in one block, no markdown renderer needed for that.
+function WeeklyRecapPanel({ recap }) {
+  if (!recap) return null;
+  const paragraphs = recap.body
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return (
+    <div className="panel" style={{ marginBottom: 20 }}>
+      <h2 style={{ fontSize: 16, margin: "0 0 10px" }}>{recap.title || `Week ${recap.week} Recap`}</h2>
+      {paragraphs.map((p, i) => (
+        <p key={i} style={{ fontSize: 14, lineHeight: 1.6, margin: i === paragraphs.length - 1 ? 0 : "0 0 10px" }}>
+          {p}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 // Movement vs. this cup's previous played week (see the contests API route
 // for how it's computed -- always against the placement-points rank,
 // regardless of whether the "Sort by" toggle below currently has fantasy
@@ -603,6 +630,17 @@ function ContestsInner() {
   );
   const logos = logoData?.logos;
 
+  // Latest written recap for the active league+season (if any) -- see
+  // WeeklyRecapPanel above. limit=1 since /api/recaps already sorts newest
+  // week first when scoped to a season; nothing renders for a league that
+  // never enabled recaps or hasn't had one posted yet.
+  const { data: recapData } = useJson(
+    activeSeason && activeLeague
+      ? `/api/recaps?league=${encodeURIComponent(activeLeague)}&season=${activeSeason}&limit=1`
+      : null
+  );
+  const latestRecap = recapData?.recaps?.[0];
+
   // Cups come back in chronological order (Mushroom -> Flower -> Star ->
   // Special), which is right for the weeks *within* a cup but backwards for
   // which cup you want to see first: the one currently being played, or
@@ -654,6 +692,8 @@ function ContestsInner() {
           </div>
         </div>
       )}
+
+      <WeeklyRecapPanel recap={latestRecap} />
 
       {startedContests.map((contest) => (
         <ContestPanel

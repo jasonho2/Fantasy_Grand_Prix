@@ -245,7 +245,7 @@ function scoringConfigToState(scoringConfig) {
   };
 }
 
-function SleeperForm({ onDone, cupWeeks, scoringConfig }) {
+function SleeperForm({ onDone, cupWeeks, scoringConfig, recapsEnabled }) {
   const [sleeperLeagueId, setSleeperLeagueId] = useState("");
   const [displayName, setDisplayName] = useState("");
   // Registration itself stays open (see the page's Sleeper intro text
@@ -273,6 +273,7 @@ function SleeperForm({ onDone, cupWeeks, scoringConfig }) {
           displayName: displayName.trim(),
           cupWeeks,
           scoringConfig,
+          recapsEnabled,
           scoringPassphrase,
         }),
       });
@@ -352,7 +353,7 @@ function SleeperForm({ onDone, cupWeeks, scoringConfig }) {
   );
 }
 
-function EspnForm({ onDone, cupWeeks, scoringConfig }) {
+function EspnForm({ onDone, cupWeeks, scoringConfig, recapsEnabled }) {
   const [espnLeagueId, setEspnLeagueId] = useState("");
   const [espnS2, setEspnS2] = useState("");
   const [espnSwid, setEspnSwid] = useState("");
@@ -380,6 +381,7 @@ function EspnForm({ onDone, cupWeeks, scoringConfig }) {
           passphrase,
           cupWeeks,
           scoringConfig,
+          recapsEnabled,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -724,8 +726,66 @@ function EditScoringForm({ league, onDone, onCancel }) {
   );
 }
 
+// Flips a registered league's recaps_enabled -- league-wide, not scoped to
+// a season (see db.py's leagues.recaps_enabled comment), so unlike
+// EditScoringForm above there's no season picker here, just a confirm +
+// passphrase. Mirrors DeleteForm's shape (a single passphrase field guarding
+// one action) rather than EditScoringForm's, since there's nothing else to
+// configure alongside this one boolean.
+function RecapsToggleForm({ league, onDone, onCancel }) {
+  const nextValue = !league.recapsEnabled;
+  const [passphrase, setPassphrase] = useState("");
+  const [status, setStatus] = useState("idle");
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setStatus("submitting");
+    setError(null);
+    try {
+      const res = await fetch(`/api/leagues/${encodeURIComponent(league.slug)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recapsEnabled: nextValue, passphrase }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+      onDone(body);
+    } catch (err) {
+      setError(err.message);
+      setStatus("error");
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <p style={{ width: "100%", margin: 0, fontSize: 13, color: "var(--text-dim)" }}>
+        {nextValue
+          ? "Turn ON the automated weekly recap for this league?"
+          : "Turn OFF the automated weekly recap for this league?"}
+      </p>
+      <input
+        type="password"
+        placeholder="Passphrase"
+        value={passphrase}
+        onChange={(e) => setPassphrase(e.target.value)}
+        required
+        autoFocus
+        style={{ flex: "1 1 200px" }}
+      />
+      <button type="submit" className="week-chip selected" disabled={status === "submitting"}>
+        {status === "submitting" ? "Saving..." : nextValue ? "Turn On" : "Turn Off"}
+      </button>
+      <button type="button" className="week-chip" onClick={onCancel}>
+        Cancel
+      </button>
+      {error && <div className="error-state" style={{ width: "100%" }}>{error}</div>}
+    </form>
+  );
+}
+
 function ManageLeagues({ leagues, deleteEnabled, onChanged }) {
-  const [editingSlug, setEditingSlug] = useState(null); // "<slug>:rename" | "<slug>:delete" | "<slug>:scoring" | null
+  const [editingSlug, setEditingSlug] = useState(null); // "<slug>:rename" | "<slug>:delete" | "<slug>:scoring" | "<slug>:recaps" | null
 
   if (!leagues || leagues.length === 0) return null;
 
@@ -741,7 +801,9 @@ function ManageLeagues({ leagues, deleteEnabled, onChanged }) {
                 ? "delete"
                 : editingSlug === `${league.slug}:scoring`
                   ? "scoring"
-                  : null;
+                  : editingSlug === `${league.slug}:recaps`
+                    ? "recaps"
+                    : null;
           return (
             <div key={league.slug} style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
               {editing === "rename" ? (
@@ -771,11 +833,25 @@ function ManageLeagues({ leagues, deleteEnabled, onChanged }) {
                     onChanged();
                   }}
                 />
+              ) : editing === "recaps" ? (
+                <RecapsToggleForm
+                  league={league}
+                  onCancel={() => setEditingSlug(null)}
+                  onDone={() => {
+                    setEditingSlug(null);
+                    onChanged();
+                  }}
+                />
               ) : (
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <div>
                     <strong>{league.displayName || league.slug}</strong>{" "}
                     <span style={{ color: "var(--text-dim)", fontSize: 12 }}>({league.platform})</span>
+                    {league.recapsEnabled && (
+                      <span className="badge scoring" style={{ marginLeft: 6 }}>
+                        Recaps on
+                      </span>
+                    )}
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button type="button" className="week-chip" onClick={() => setEditingSlug(`${league.slug}:rename`)}>
@@ -783,6 +859,9 @@ function ManageLeagues({ leagues, deleteEnabled, onChanged }) {
                     </button>
                     <button type="button" className="week-chip" onClick={() => setEditingSlug(`${league.slug}:scoring`)}>
                       Edit Scoring
+                    </button>
+                    <button type="button" className="week-chip" onClick={() => setEditingSlug(`${league.slug}:recaps`)}>
+                      {league.recapsEnabled ? "Turn Off Recaps" : "Turn On Recaps"}
                     </button>
                     <button
                       type="button"
@@ -820,6 +899,11 @@ export default function AddLeaguePage() {
     CUP_NAMES.map(() => ({ mode: "solo", pointTable: blankPointTable("solo") }))
   );
   const scoringConfig = buildScoringConfig({ uniform, uniformConfig, perCupConfig });
+  // Opt-in for the automated weekly recap (see api/recaps/route.js and
+  // db.py's leagues.recaps_enabled comment) -- off by default, unlike
+  // cupWeeks/scoringConfig this isn't season-scoped, so there's just one
+  // flag here rather than per-cup/per-season state.
+  const [recapsEnabled, setRecapsEnabled] = useState(false);
 
   // Once we know whether ESPN self-service is enabled on this deployment,
   // don't leave the tab sitting on a form that can only ever 401.
@@ -896,10 +980,30 @@ export default function AddLeaguePage() {
           onPerCupConfigChange={setPerCupConfig}
         />
 
+        {/* Separate from GrandPrixSettings above -- this doesn't vary by
+            season the way cup length/scoring do, it's a one-time "does this
+            league want this feature at all" choice. Available to every
+            league at registration (or later via Manage Leagues), even
+            though only one league actually has it switched on today. */}
+        <div className="panel" style={{ background: "var(--bg)", marginBottom: 16 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={recapsEnabled}
+              onChange={(e) => setRecapsEnabled(e.target.checked)}
+            />
+            Enable automated weekly recap
+          </label>
+          <p style={{ fontSize: 12, color: "var(--text-dim)", margin: "6px 0 0" }}>
+            Posts a written recap of each week&apos;s matchups once it&apos;s final, shown above the
+            Contests leaderboard and archived on the Weekly Report page.
+          </p>
+        </div>
+
         {platform === "sleeper" ? (
-          <SleeperForm onDone={setResult} cupWeeks={cupWeeks} scoringConfig={scoringConfig} />
+          <SleeperForm onDone={setResult} cupWeeks={cupWeeks} scoringConfig={scoringConfig} recapsEnabled={recapsEnabled} />
         ) : (
-          <EspnForm onDone={setResult} cupWeeks={cupWeeks} scoringConfig={scoringConfig} />
+          <EspnForm onDone={setResult} cupWeeks={cupWeeks} scoringConfig={scoringConfig} recapsEnabled={recapsEnabled} />
         )}
       </div>
 

@@ -6,6 +6,7 @@ import { normalizeCupWeeks, normalizeScoringConfig } from "@/lib/scoring";
 // delete (passphrase-gated) an existing league.
 //
 // PATCH /api/leagues/<slug>  { displayName? }  and/or  { season, cupWeeks?, scoringConfig?, passphrase }
+//                            and/or  { recapsEnabled, passphrase }
 // DELETE /api/leagues/<slug> { passphrase }
 //
 // Renaming is a purely cosmetic/display preference -- no credentials or
@@ -26,6 +27,12 @@ import { normalizeCupWeeks, normalizeScoringConfig } from "@/lib/scoring";
 // (see web/lib/scoring.js and api/leagues/route.js's
 // upsertLeague/upsertSeasonDefaults) -- this is how a season's Grand Prix
 // defaults get set for the first time, or changed later.
+//
+// recapsEnabled is a third, independent field group: a plain boolean,
+// league-wide rather than per-season (see db.py's leagues.recaps_enabled),
+// gated by the same passphrase as cupWeeks/scoringConfig but requiring no
+// `season` of its own -- present in the body means "set this league's
+// recaps_enabled to this value," on its own or alongside the other fields.
 //
 // Deleting is destructive and irreversible (every team/matchup/weekly
 // score/contest result for that league, gone), and this site still has no
@@ -52,11 +59,22 @@ export async function PATCH(request, context) {
   // partial-update ambiguity between them; presence of either one in the
   // body means "update both."
   const hasScoring = body && (body.cupWeeks !== undefined || body.scoringConfig !== undefined);
+  // recapsEnabled is edited separately from cupWeeks/scoringConfig above --
+  // it's league-wide (see db.py's leagues.recaps_enabled comment), not
+  // scoped to a season, so it doesn't require `season` the way hasScoring
+  // does. Same passphrase gate as scoring, though: flipping it starts (or
+  // stops) an automated task posting AI-written content about this league,
+  // which deserves the same commissioner-only bar as scoring edits, not
+  // renaming's open one.
+  const hasRecapsToggle = body && body.recapsEnabled !== undefined;
   const season = Number(body?.season);
 
-  if (!displayName && !hasScoring) {
+  if (!displayName && !hasScoring && !hasRecapsToggle) {
     return Response.json(
-      { error: "Nothing to update -- send a non-empty displayName and/or cupWeeks/scoringConfig." },
+      {
+        error:
+          "Nothing to update -- send a non-empty displayName and/or cupWeeks/scoringConfig/recapsEnabled.",
+      },
       { status: 400 }
     );
   }
@@ -66,13 +84,13 @@ export async function PATCH(request, context) {
       { status: 400 }
     );
   }
-  // Editing scoring is gated the same way DELETE is below -- unlike
-  // renaming, which stays open (see file-level comment). Checked before
-  // touching the database so a wrong passphrase can't even partially apply
-  // (e.g. renaming while also silently rejecting the scoring half).
-  if (hasScoring && !passphraseOk(body?.passphrase)) {
+  // Editing scoring (or the recaps toggle) is gated the same way DELETE is
+  // below -- unlike renaming, which stays open (see file-level comment).
+  // Checked before touching the database so a wrong passphrase can't even
+  // partially apply (e.g. renaming while also silently rejecting the rest).
+  if ((hasScoring || hasRecapsToggle) && !passphraseOk(body?.passphrase)) {
     return Response.json(
-      { error: "Incorrect passphrase, or scoring edits aren't enabled on this deployment." },
+      { error: "Incorrect passphrase, or scoring/recaps edits aren't enabled on this deployment." },
       { status: 401 }
     );
   }
@@ -111,6 +129,11 @@ export async function PATCH(request, context) {
       result.season = season;
       result.cupWeeks = cupWeeks;
       result.scoringConfig = scoringConfig;
+    }
+    if (hasRecapsToggle) {
+      const recapsEnabled = Boolean(body.recapsEnabled);
+      await query("UPDATE leagues SET recaps_enabled = ? WHERE slug = ?", [recapsEnabled ? 1 : 0, slug]);
+      result.recapsEnabled = recapsEnabled;
     }
     return Response.json(result);
   } catch (err) {

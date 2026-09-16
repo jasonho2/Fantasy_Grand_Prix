@@ -44,9 +44,17 @@ import { normalizeCupWeeks, normalizeScoringConfig } from "@/lib/scoring";
 // defaults instead, and the response's `scoringSaved` flag reports whether
 // the submitted settings actually took.
 //
+// `recapsEnabled` (optional boolean, default false) rides along with the
+// same gating as cupWeeks/scoringConfig on both platforms -- opts this
+// league into the automated weekly recap (see api/recaps/route.js and
+// db.py's leagues.recaps_enabled comment). Unlike cupWeeks/scoringConfig,
+// it's stored directly on `leagues`, not per-season on `league_seasons`,
+// since it's a "does this league want this feature at all" toggle rather
+// than something that legitimately varies year to year.
+//
 // POST /api/leagues
-//   Sleeper: { platform: "sleeper", sleeperLeagueId, displayName?, cupWeeks?, scoringConfig?, scoringPassphrase? }
-//   ESPN:    { platform: "espn", espnLeagueId, espnS2?, espnSwid?, years?, displayName?, passphrase, cupWeeks?, scoringConfig? }
+//   Sleeper: { platform: "sleeper", sleeperLeagueId, displayName?, cupWeeks?, scoringConfig?, recapsEnabled?, scoringPassphrase? }
+//   ESPN:    { platform: "espn", espnLeagueId, espnS2?, espnSwid?, years?, displayName?, passphrase, cupWeeks?, scoringConfig?, recapsEnabled? }
 
 function slugify(base) {
   return base
@@ -78,17 +86,20 @@ async function reserveSlug(baseSlug, matchesExisting) {
 // on a very old DB) the same way it always has: falls back to the
 // pre-existing INSERT shape rather than 500ing on every new league
 // registration in the meantime.
-async function upsertLeague({ platform, slug, displayName, sleeperLeagueId, espnFields }) {
+async function upsertLeague({ platform, slug, displayName, sleeperLeagueId, espnFields, recapsEnabled }) {
   const isEspn = platform === "espn";
   const baseCols = isEspn
-    ? ["platform", "slug", "display_name", "espn_league_id", "espn_s2", "espn_swid", "pull_years"]
-    : ["platform", "slug", "display_name", "sleeper_league_id"];
+    ? ["platform", "slug", "display_name", "espn_league_id", "espn_s2", "espn_swid", "pull_years", "recaps_enabled"]
+    : ["platform", "slug", "display_name", "sleeper_league_id", "recaps_enabled"];
   const baseVals = isEspn
-    ? ["espn", slug, displayName, espnFields.espnLeagueId, espnFields.espnS2, espnFields.espnSwid, espnFields.pullYearsJson]
-    : ["sleeper", slug, displayName, sleeperLeagueId];
+    ? [
+        "espn", slug, displayName, espnFields.espnLeagueId, espnFields.espnS2, espnFields.espnSwid,
+        espnFields.pullYearsJson, recapsEnabled ? 1 : 0,
+      ]
+    : ["sleeper", slug, displayName, sleeperLeagueId, recapsEnabled ? 1 : 0];
   const baseUpdates = isEspn
-    ? "display_name = excluded.display_name, espn_league_id = excluded.espn_league_id, espn_s2 = excluded.espn_s2, espn_swid = excluded.espn_swid, pull_years = excluded.pull_years"
-    : "display_name = excluded.display_name, sleeper_league_id = excluded.sleeper_league_id";
+    ? "display_name = excluded.display_name, espn_league_id = excluded.espn_league_id, espn_s2 = excluded.espn_s2, espn_swid = excluded.espn_swid, pull_years = excluded.pull_years, recaps_enabled = excluded.recaps_enabled"
+    : "display_name = excluded.display_name, sleeper_league_id = excluded.sleeper_league_id, recaps_enabled = excluded.recaps_enabled";
 
   await query(
     `INSERT INTO leagues (${baseCols.join(", ")})
@@ -198,12 +209,17 @@ async function handleSleeper(body) {
   // defaults instead of whatever was submitted -- the commissioner can
   // always set real values afterward via Manage Leagues (which hard-fails
   // instead, since editing scoring is that form's entire purpose).
-  const requestedScoring = body?.cupWeeks !== undefined || body?.scoringConfig !== undefined;
+  const requestedScoring =
+    body?.cupWeeks !== undefined || body?.scoringConfig !== undefined || body?.recapsEnabled !== undefined;
   const scoringAuthorized = passphraseOk(body?.scoringPassphrase);
   const cupWeeks = normalizeCupWeeks(scoringAuthorized ? body?.cupWeeks : null);
   const scoringConfig = normalizeScoringConfig(scoringAuthorized ? body?.scoringConfig : null);
+  // Same commissioner-only gating as cupWeeks/scoringConfig above -- an
+  // unauthorized request just registers with recaps off (the safe default)
+  // rather than blocking registration entirely.
+  const recapsEnabled = scoringAuthorized ? Boolean(body?.recapsEnabled) : false;
 
-  await upsertLeague({ platform: "sleeper", slug, displayName, sleeperLeagueId });
+  await upsertLeague({ platform: "sleeper", slug, displayName, sleeperLeagueId, recapsEnabled });
   await upsertSeasonDefaults(slug, season, { cupWeeks, scoringConfig });
 
   return Response.json({
@@ -212,6 +228,7 @@ async function handleSleeper(body) {
     season,
     cupWeeks,
     scoringConfig,
+    recapsEnabled,
     // Tells the form whether its submitted Grand Prix settings actually
     // took, so it can say so, rather than silently showing plain defaults
     // back with no explanation of why they don't match what was entered.
@@ -275,8 +292,11 @@ async function handleEspn(body) {
   // (same `checkYear` already used to validate the league/cookies above) --
   // no separate passphrase needed for this, since the top-of-function
   // passphraseOk(body?.passphrase) check already gates this entire request,
-  // scoring settings included.
+  // scoring settings included. recapsEnabled rides along the same way --
+  // taken directly, no extra gate, since this whole request is already
+  // passphrase-checked above.
   const season = checkYear;
+  const recapsEnabled = Boolean(body?.recapsEnabled);
 
   await upsertLeague({
     platform: "espn",
@@ -288,10 +308,13 @@ async function handleEspn(body) {
       espnSwid: espnSwid || null,
       pullYearsJson: JSON.stringify(pullYears),
     },
+    recapsEnabled,
   });
   await upsertSeasonDefaults(slug, season, { cupWeeks, scoringConfig });
 
-  return Response.json({ slug, displayName: displayName || slug, years: pullYears, season, cupWeeks, scoringConfig });
+  return Response.json({
+    slug, displayName: displayName || slug, years: pullYears, season, cupWeeks, scoringConfig, recapsEnabled,
+  });
 }
 
 export async function POST(request) {
@@ -331,6 +354,17 @@ export async function GET() {
   const leagues = await query(
     "SELECT slug, display_name AS displayName, platform FROM leagues ORDER BY slug"
   ).catch(() => [] /* tolerate a not-yet-migrated DB that lacks the leagues table entirely */);
+
+  // Fetched as its own separate, separately-tolerant query rather than
+  // folded into the leagues SELECT above -- same reason seasonRows below is
+  // split out too: a not-yet-migrated DB missing just this one column
+  // should still show the rest of the league list, not fail it wholesale.
+  const recapsEnabledRows = await query(
+    "SELECT slug, recaps_enabled AS recapsEnabledRaw FROM leagues"
+  ).catch(() => []);
+  const recapsEnabledBySlug = new Map(
+    recapsEnabledRows.map((r) => [r.slug, Boolean(r.recapsEnabledRaw)])
+  );
 
   // Every (league, season) row that exists at all -- a season shows up here
   // once the pipeline has pulled it even once (see db.py's
@@ -376,6 +410,7 @@ export async function GET() {
       seasons: seasonEntries.map((e) => e.season),
       cupWeeksBySeason,
       scoringConfigBySeason,
+      recapsEnabled: recapsEnabledBySlug.get(l.slug) || false,
     };
   });
 
