@@ -32,6 +32,19 @@ export const DEFAULT_POINT_TABLES = {
 // per-cup scoring config is positional against this same order.
 export const CUP_NAMES = ["Mushroom Cup", "Flower Cup", "Star Cup", "Special Cup"];
 
+// Mario Kart: Double Dash!! track order within each cup -- race N of a cup
+// (its Nth week) takes the Nth track. Same mapping the weekly recap
+// automation uses for its titles, so the Contests table's per-week titles
+// line up with the recap for that week. A cup configured longer than 4
+// weeks just has no track name for the extra races (callers fall back to
+// "Race N").
+export const CUP_TRACKS = {
+  "Mushroom Cup": ["Luigi Circuit", "Peach Beach", "Baby Park", "Dry Dry Desert"],
+  "Flower Cup": ["Mushroom Bridge", "Mario Circuit", "Daisy Cruiser", "Waluigi Stadium"],
+  "Star Cup": ["Sherbet Land", "Mushroom City", "Yoshi Circuit", "DK Mountain"],
+  "Special Cup": ["Wario Colosseum", "Dino Dino Jungle", "Bowser's Castle", "Rainbow Road"],
+};
+
 export const DEFAULT_CUP_WEEKS = 16;
 
 export function ordinal(n) {

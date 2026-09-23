@@ -644,3 +644,20 @@ tr:hover td {
   -webkit-hyphens: manual;
   overflow-wrap: break-word;
 }
+
+/* Contests: title above each cup's table/chart describing the current
+   Mode / Sort by / View selection (see leaderboardTitle in
+   contests/page.js). */
+.leaderboard-title {
+  margin: 4px 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .leaderboard-title {
+    font-size: 13px;
+    padding: 0 4px;
+  }
+}

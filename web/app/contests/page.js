@@ -18,7 +18,7 @@ import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/Ch
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
 import { useIsDesktop, sideTooltipProps, sideTooltipMargin } from "../../lib/sideTooltip";
-import { ordinal } from "../../lib/scoring";
+import { ordinal, CUP_TRACKS } from "../../lib/scoring";
 
 // Matches the palette used for the Standings/Players trend charts, for a
 // consistent look across the app's line charts.
@@ -164,6 +164,32 @@ function hyphenateLongWords(name) {
         .join("");
     })
     .join("");
+}
+
+// Title shown above a cup's table/chart, describing exactly what's
+// currently displayed -- Mode (Solo/Double Dash) x Sort by (Total, Fantasy
+// Points, Projected Finish, or a clicked Wk column) x View (Table/Chart).
+// Mario Kart flavored to match the weekly recaps: a clicked week column is
+// titled with that race's Double Dash track (see CUP_TRACKS).
+function leaderboardTitle({ contestName, weeks, mode, sortBy, view }) {
+  const modeLabel = mode === "doubleDash" ? "Double Dash" : "Solo";
+  if (view === "chart") {
+    return sortBy === "projected"
+      ? `${modeLabel} Projected Race Progress -- Cumulative Points`
+      : `${modeLabel} Race Progress -- Cumulative Points`;
+  }
+  if (sortBy === "fantasy_points") return `${modeLabel} Standings -- by Fantasy Points`;
+  if (sortBy === "projected") return `${modeLabel} Projected Podium`;
+  if (typeof sortBy === "string" && sortBy.startsWith(WEEK_SORT_PREFIX)) {
+    const weekIndex = Number(sortBy.slice(WEEK_SORT_PREFIX.length));
+    const raceNumber = weekIndex + 1;
+    const track = CUP_TRACKS[contestName]?.[weekIndex];
+    const weekNote = weeks?.[weekIndex] != null ? ` -- Wk ${weeks[weekIndex]}` : "";
+    return track
+      ? `Race ${raceNumber} Results: ${track} (${modeLabel})`
+      : `Race ${raceNumber} Results (${modeLabel})${weekNote}`;
+  }
+  return `${modeLabel} Standings`;
 }
 
 function RankDelta({ delta }) {
@@ -477,6 +503,10 @@ function ContestPanel({ contest, league, season, logos }) {
           Reset to Default
         </button>
       </div>
+
+      <h3 className="leaderboard-title">
+        {leaderboardTitle({ contestName: contest.name, weeks: contest.weeks, mode, sortBy, view })}
+      </h3>
 
       {view === "table" ? (
         <div className="table-scroll">
