@@ -649,6 +649,7 @@ tr:hover td {
    Mode / Sort by / View selection (see leaderboardTitle in
    contests/page.js). */
 .leaderboard-title {
+  text-align: center;
   margin: 4px 0 8px;
   font-size: 15px;
   font-weight: 700;
@@ -661,3 +662,37 @@ tr:hover td {
     padding: 0 4px;
   }
 }
+
+/* Contests "Projected Finish": subtle gold/silver/bronze tint on the
+   projected podium rows (contests/page.js adds .podium-1/2/3). Tints are
+   opaque colors rather than rgba overlays because the frozen Team column
+   (.sticky-col) needs a solid background to hide the columns scrolling
+   underneath it. A thin medal-colored bar on the rank cell carries the
+   color for anyone who can't easily tell the tints apart. */
+:root {
+  --podium-1-bg: #29261a;
+  --podium-2-bg: #21252d;
+  --podium-3-bg: #2a211c;
+  --podium-1-bar: #c9a53c;
+  --podium-2-bar: #9aa4b2;
+  --podium-3-bar: #b87a4b;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --podium-1-bg: #fbf4dc;
+    --podium-2-bg: #eef1f5;
+    --podium-3-bg: #f8eadf;
+  }
+}
+
+.contests-table tr.podium-1 td,
+.contests-table tr.podium-1:hover td { background: var(--podium-1-bg); }
+.contests-table tr.podium-2 td,
+.contests-table tr.podium-2:hover td { background: var(--podium-2-bg); }
+.contests-table tr.podium-3 td,
+.contests-table tr.podium-3:hover td { background: var(--podium-3-bg); }
+
+.contests-table tr.podium-1 td:first-child { box-shadow: inset 3px 0 0 var(--podium-1-bar); }
+.contests-table tr.podium-2 td:first-child { box-shadow: inset 3px 0 0 var(--podium-2-bar); }
+.contests-table tr.podium-3 td:first-child { box-shadow: inset 3px 0 0 var(--podium-3-bar); }

@@ -555,7 +555,15 @@ function ContestPanel({ contest, league, season, logos }) {
             </thead>
             <tbody>
               {sortedLeaderboard.map((row) => (
-                <tr key={row.team} style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}>
+                <tr
+                  key={row.team}
+                  style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}
+                  // Projected Finish: tint the top three rows (gold/silver/
+                  // bronze, see .podium-N in globals.css) to mark the
+                  // projected podium. Other sorts get no tint.
+                  className={sortBy === "projected" && row.displayRank <= 3 ? `podium-${row.displayRank}` : undefined}
+                  title={sortBy === "projected" && row.displayRank <= 3 ? `Projected ${ordinal(row.displayRank)} place` : undefined}
+                >
                   <td>{ordinal(row.displayRank)}</td>
                   <td className="sticky-col">
                     <span
