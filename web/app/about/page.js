@@ -1,3 +1,5 @@
+import GrandPrixNavTitle from "./GrandPrixNavTitle";
+
 const bodyStyle = { color: "var(--text-dim)", fontSize: 14 };
 const subheadStyle = { fontSize: 14, color: "var(--text)", margin: "20px 0 8px" };
 const firstSubheadStyle = { ...subheadStyle, marginTop: 0 };
@@ -46,8 +48,8 @@ export default function AboutPage() {
           First place to last place earns points in this order: 12, 10, 9, 8, 7, 5.
         </p>
         <p style={bodyStyle}>
-          Scoring formats can be changed under &quot;Change Point System&quot; on any cup for both
-          Solo and Double Dash modes.
+          Scoring formats are defined upon league import and can be changed under &quot;Edit
+          Scoring&quot; under the Leagues tab, which requires a passphrase.
         </p>
 
         <h3 style={subheadStyle}>Disclaimer on Number of Weeks</h3>
@@ -81,7 +83,7 @@ export default function AboutPage() {
         <h2>Navigation</h2>
 
         <div style={{ marginTop: -12 }}>
-          <NavEntry title="Contests">
+          <NavEntry title={<GrandPrixNavTitle />}>
             Grand Prix leaderboard for each cup -- Mushroom, Flower, Star, and Special Cups. Sort
             by Total Grand Prix points or Fantasy Points For, swap between Solo and Double Dash
             modes, and view data as a Table or Chart.
@@ -106,6 +108,12 @@ export default function AboutPage() {
             Season matchups and scoreboard with team record and winners highlighted in green.
           </NavEntry>
 
+          <NavEntry title="Weekly Report">
+            A Mario Kart Double Dash, AI-generated recap of the prior week matchups and
+            performances will appear here. The most recent recap will also appear on the main
+            contests page above the current cup.
+          </NavEntry>
+
           <h3 style={subheadStyle}>Leagues</h3>
           <p style={bodyStyle}>
             Enter league information from ESPN or Sleeper. For private leagues, ESPN requires
@@ -114,6 +122,9 @@ export default function AboutPage() {
             leagues.
           </p>
           <p style={bodyStyle}>Anyone can add a Sleeper league with the Sleeper League ID.</p>
+          <p style={bodyStyle}>
+            Scoring formats can be edited with a passphrase and auto recaps can be turned off.
+          </p>
         </div>
       </div>
 
