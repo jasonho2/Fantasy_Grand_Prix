@@ -631,3 +631,16 @@ tr:hover td {
 .error-state {
   color: var(--loss);
 }
+
+/* Contests Team column: the name sits next to its logo inside an
+   inline-flex span, and a flex item won't shrink below its longest
+   unbreakable word unless min-width is 0 -- that's what let long names
+   spill into the Wk columns. hyphens: manual breaks only at the soft
+   hyphens contests/page.js inserts (hyphenateLongWords), showing a "-"
+   where a word is split. */
+.team-name-hyphenate {
+  min-width: 0;
+  hyphens: manual;
+  -webkit-hyphens: manual;
+  overflow-wrap: break-word;
+}

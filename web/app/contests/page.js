@@ -143,6 +143,29 @@ function WeeklyRecapPanel({ recap }) {
 // regardless of whether the "Sort by" toggle below currently has fantasy
 // points selected instead). Nothing renders for a team that held its
 // spot, or before a second week has been played in this cup.
+// Team names with a single long "word" (e.g. "@thereal_achane") can't wrap
+// at a space, so on a narrow Team column they'd overflow into the Wk
+// columns. Insert soft hyphens (U+00AD) inside any word longer than
+// HYPHENATE_MIN_WORD chars: invisible normally, but the browser may break
+// there when the word doesn't fit, showing a hyphen at the break. The
+// first/last 2 characters stay together so a break never strands a single
+// letter. Short words and normal spacing are left untouched.
+const SOFT_HYPHEN = "\u00AD";
+const HYPHENATE_MIN_WORD = 8;
+function hyphenateLongWords(name) {
+  if (!name) return name;
+  return name
+    .split(/(\s+)/)
+    .map((part) => {
+      const chars = Array.from(part);
+      if (/^\s+$/.test(part) || chars.length <= HYPHENATE_MIN_WORD) return part;
+      return chars
+        .map((ch, i) => (i >= 2 && i <= chars.length - 2 ? SOFT_HYPHEN + ch : ch))
+        .join("");
+    })
+    .join("");
+}
+
 function RankDelta({ delta }) {
   if (!delta) return null;
   const up = delta > 0;
@@ -510,7 +533,9 @@ function ContestPanel({ contest, league, season, logos }) {
                       style={{ display: "inline-flex", alignItems: "center", gap: 6, verticalAlign: "middle" }}
                     >
                       <TeamLogo src={logos?.[row.team]} />
-                      {row.team}
+                      <span className="team-name-hyphenate" title={row.team}>
+                        {hyphenateLongWords(row.team)}
+                      </span>
                     </span>
                     <RankDelta delta={row.rankDelta} />
                     {row.displayRank === 1 && (
