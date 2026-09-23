@@ -17,6 +17,7 @@ import TeamLogo from "../components/TeamLogo";
 import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/ChartTeamLogoDot";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
+import { useIsDesktop, sideTooltipProps, sideTooltipMargin } from "../../lib/sideTooltip";
 import { ordinal } from "../../lib/scoring";
 
 // Matches the palette used for the Standings/Players trend charts, for a
@@ -180,6 +181,7 @@ function ContestPanel({ contest, league, season, logos }) {
   // Descending only, per spec -- just which column, not direction.
   const [sortBy, setSortBy] = useState("contest_points");
   const [view, setView] = useState("table");
+  const isDesktop = useIsDesktop();
   // Clicking a team's name in the chart legend narrows the chart to just
   // that team's line; clicking it again, or clicking anywhere else in the
   // chart, clears it back to showing everyone.
@@ -544,7 +546,7 @@ function ContestPanel({ contest, league, season, logos }) {
               {/* Extra right margin makes room for each line's end-of-line
                   team logo (see ChartTeamLogoDot), drawn just past the last
                   plotted point rather than on top of it. */}
-              <LineChart data={chartData} margin={{ top: 10, right: 44, bottom: 10, left: 0 }}>
+              <LineChart data={chartData} margin={{ top: 10, right: 44 + sideTooltipMargin(isDesktop), bottom: 10, left: 0 }}>
                 <CartesianGrid stroke="var(--border)" />
                 <XAxis
                   dataKey="week"
@@ -560,7 +562,7 @@ function ContestPanel({ contest, league, season, logos }) {
                     fill: "var(--text-dim)",
                   }}
                 />
-                <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)" }} />
+                <Tooltip {...sideTooltipProps(isDesktop)} />
                 <Legend
                   payload={legendPayload}
                   onClick={(entry, index, event) => selectTeam(entry.value, event)}

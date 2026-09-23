@@ -18,6 +18,7 @@ import TeamLogo from "../components/TeamLogo";
 import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/ChartTeamLogoDot";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
+import { useIsDesktop, sideTooltipProps, sideTooltipMargin } from "../../lib/sideTooltip";
 
 const COLORS = [
   "#5b9dff", "#3ecf8e", "#ff6b6b", "#d9b64e", "#c77dff",
@@ -161,6 +162,7 @@ function TrendChart({
   chartId,
 }) {
   const [viewMode, setViewMode] = useState(defaultViewMode); // "weekly" | "cumulative"
+  const isDesktop = useIsDesktop();
 
   const { teams, rows } = useMemo(() => {
     return viewMode === "cumulative"
@@ -252,7 +254,7 @@ function TrendChart({
           {/* Extra right margin makes room for each line's end-of-line team
               logo, which is drawn just past the last plotted point (see
               ChartTeamLogoDot) rather than on top of it. */}
-          <LineChart data={rows} margin={{ bottom: 12, right: 28 }}>
+          <LineChart data={rows} margin={{ bottom: 12, right: 28 + sideTooltipMargin(isDesktop) }}>
             <CartesianGrid stroke="var(--border)" />
             <XAxis
               dataKey="week"
@@ -272,7 +274,7 @@ function TrendChart({
                   : undefined
               }
             />
-            <Tooltip contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)" }} />
+            <Tooltip {...sideTooltipProps(isDesktop)} />
             {showDivider && (
               <ReferenceLine
                 x={regularSeasonWeeks + 0.5}
