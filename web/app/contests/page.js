@@ -192,6 +192,12 @@ function leaderboardTitle({ contestName, weeks, mode, sortBy, view }) {
   return `${modeLabel} Standings`;
 }
 
+// Chart geometry shared by the cup chart and its title (see ContestPanel):
+// the Y axis width (Recharts' default, made explicit) and the right margin
+// that leaves room for each line's end-of-line team logo.
+const CHART_Y_AXIS_WIDTH = 60;
+const CHART_RIGHT_MARGIN = 44;
+
 function RankDelta({ delta }) {
   if (!delta) return null;
   const up = delta > 0;
@@ -504,7 +510,18 @@ function ContestPanel({ contest, league, season, logos }) {
         </button>
       </div>
 
-      <h3 className="leaderboard-title">
+      {/* In Chart view, pad the title by the same widths the chart
+          reserves on each side (Y axis on the left; logo + desktop tooltip
+          column on the right) so it's centered over the plotted x-axis
+          rather than the whole panel. */}
+      <h3
+        className="leaderboard-title"
+        style={
+          view === "chart"
+            ? { paddingLeft: CHART_Y_AXIS_WIDTH, paddingRight: CHART_RIGHT_MARGIN + sideTooltipMargin(isDesktop) }
+            : undefined
+        }
+      >
         {leaderboardTitle({ contestName: contest.name, weeks: contest.weeks, mode, sortBy, view })}
       </h3>
 
@@ -609,7 +626,7 @@ function ContestPanel({ contest, league, season, logos }) {
               {/* Extra right margin makes room for each line's end-of-line
                   team logo (see ChartTeamLogoDot), drawn just past the last
                   plotted point rather than on top of it. */}
-              <LineChart data={chartData} margin={{ top: 10, right: 44 + sideTooltipMargin(isDesktop), bottom: 10, left: 0 }}>
+              <LineChart data={chartData} margin={{ top: 10, right: CHART_RIGHT_MARGIN + sideTooltipMargin(isDesktop), bottom: 10, left: 0 }}>
                 <CartesianGrid stroke="var(--border)" />
                 <XAxis
                   dataKey="week"
@@ -617,6 +634,7 @@ function ContestPanel({ contest, league, season, logos }) {
                   label={{ value: "Week", position: "insideBottom", offset: -5, fill: "var(--text-dim)" }}
                 />
                 <YAxis
+                  width={CHART_Y_AXIS_WIDTH}
                   stroke="var(--text-dim)"
                   label={{
                     value: "Cumulative points",
