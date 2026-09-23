@@ -109,7 +109,7 @@ export default function AboutPage() {
           </NavEntry>
 
           <NavEntry title="Weekly Report">
-            A Mario Kart Double Dash, AI-generated recap of the prior week matchups and
+            A Mario Kart Double Dash inspired, AI-generated recap of the prior week matchups and
             performances will appear here. The most recent recap will also appear on the main
             contests page above the current cup.
           </NavEntry>
