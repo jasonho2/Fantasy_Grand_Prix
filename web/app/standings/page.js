@@ -15,7 +15,6 @@ import {
 import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
 import TeamLogo from "../components/TeamLogo";
-import CrownBadge from "../components/CrownBadge";
 import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/ChartTeamLogoDot";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
@@ -350,16 +349,6 @@ function StandingsInner() {
   );
   const logos = logoData?.logos;
 
-  // Team name (this season) -> { count, wins } Grand Prix crowns, counted
-  // across every season under the league's configured scoring -- shown as a
-  // numbered crown next to the team name (see api/crowns/route.js).
-  const { data: crownData } = useJson(
-    activeSeason && activeLeague
-      ? `/api/crowns?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}`
-      : null
-  );
-  const crowns = crownData?.crowns;
-
   // null = default sort (best win-loss record, points_for as tiebreaker).
   // Clicking a column header switches to sorting by that column alone.
   const [sortKey, setSortKey] = useState(null);
@@ -523,7 +512,6 @@ function StandingsInner() {
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                           <TeamLogo src={logos?.[row.team]} />
                           {row.team}
-                          <CrownBadge crown={crowns?.[row.team]} />
                         </span>
                       </td>
                       <td>{row.wins}</td>

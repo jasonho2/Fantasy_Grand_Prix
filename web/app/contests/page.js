@@ -14,6 +14,7 @@ import {
 import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
 import TeamLogo from "../components/TeamLogo";
+import CrownBadge from "../components/CrownBadge";
 import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/ChartTeamLogoDot";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
@@ -219,7 +220,7 @@ function RankDelta({ delta }) {
   );
 }
 
-function ContestPanel({ contest, league, season, logos }) {
+function ContestPanel({ contest, league, season, logos, crowns }) {
   // This cup's league-configured default mode (see api/contests/route.js's
   // defaultModeForCup) -- what the Mode toggle opens on, and what "Reset to
   // Default" switches back to regardless of whichever mode is currently
@@ -592,6 +593,14 @@ function ContestPanel({ contest, league, season, logos }) {
                         {hyphenateLongWords(row.team)}
                       </span>
                     </span>
+                    {/* Outside the logo+name flex row so it never squeezes the
+                        name on the narrow mobile Team column -- it sits with
+                        the rank arrow / Leader badge instead. */}
+                    {crowns?.[row.team] && (
+                      <span style={{ marginLeft: 6, verticalAlign: "middle" }}>
+                        <CrownBadge crown={crowns[row.team]} size={20} />
+                      </span>
+                    )}
                     <RankDelta delta={row.rankDelta} />
                     {row.displayRank === 1 && (
                       <span className="badge win" style={{ marginLeft: 6 }}>
@@ -713,6 +722,16 @@ function ContestsInner() {
   );
   const logos = logoData?.logos;
 
+  // Team name (this season) -> { count, wins }: Grand Prix cups won across
+  // every season under the league's configured scoring, shown as a numbered
+  // crown next to the team in each cup's table (see api/crowns/route.js).
+  const { data: crownData } = useJson(
+    activeSeason && activeLeague
+      ? `/api/crowns?season=${activeSeason}&league=${encodeURIComponent(activeLeague)}`
+      : null
+  );
+  const crowns = crownData?.crowns;
+
   // Latest written recap for the active league+season (if any) -- see
   // WeeklyRecapPanel above. limit=1 since /api/recaps already sorts newest
   // week first when scoped to a season; nothing renders for a league that
@@ -796,6 +815,7 @@ function ContestsInner() {
           league={activeLeague}
           season={activeSeason}
           logos={logos}
+          crowns={crowns}
         />
       ))}
     </>
