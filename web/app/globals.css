@@ -696,3 +696,16 @@ tr:hover td {
 .contests-table tr.podium-1 td:first-child { box-shadow: inset 3px 0 0 var(--podium-1-bar); }
 .contests-table tr.podium-2 td:first-child { box-shadow: inset 3px 0 0 var(--podium-2-bar); }
 .contests-table tr.podium-3 td:first-child { box-shadow: inset 3px 0 0 var(--podium-3-bar); }
+
+/* Section labels inside a weekly recap ("Race Results", "Podium Watch --
+   Contest Points", ...) -- see components/RecapBody.js. */
+.recap-heading {
+  margin: 16px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}

@@ -2,30 +2,10 @@
 
 import { Suspense } from "react";
 import LeagueSelect from "../components/LeagueSelect";
+import RecapBody from "../components/RecapBody";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
 
-// Renders one recap's body as separate paragraphs -- same convention as
-// contests/page.js's WeeklyRecapPanel (stored as plain text with blank
-// lines between paragraphs, no markdown renderer needed).
-function RecapBody({ body }) {
-  const paragraphs = body
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  return paragraphs.map((p, i) => (
-    <p key={i} style={{ fontSize: 14, lineHeight: 1.6, margin: i === paragraphs.length - 1 ? 0 : "0 0 10px" }}>
-      {p}
-    </p>
-  ));
-}
-
-// Archive of every recap ever posted for a league, newest first -- unlike
-// the single latest one shown on the Contests page, this has no season
-// filter, so a recap from last year sits right below this year's most
-// recent one. See api/recaps/route.js: omitting `season` from the query
-// returns every recap for the league across all seasons, already sorted
-// season desc, week desc.
 function WeeklyReportInner() {
   const [league, setLeague] = useUrlState("league");
 

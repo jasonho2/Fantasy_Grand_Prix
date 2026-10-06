@@ -15,6 +15,7 @@ import SeasonSelect from "../components/SeasonSelect";
 import LeagueSelect from "../components/LeagueSelect";
 import TeamLogo from "../components/TeamLogo";
 import CrownBadge from "../components/CrownBadge";
+import RecapBody from "../components/RecapBody";
 import ChartTeamLogoDot, { slugForId, lastValidRowIndex } from "../components/ChartTeamLogoDot";
 import { useJson } from "../../lib/useJson";
 import { useUrlState } from "../../lib/useUrlState";
@@ -123,18 +124,10 @@ const CUP_ICONS = {
 // rather than dumped in one block, no markdown renderer needed for that.
 function WeeklyRecapPanel({ recap }) {
   if (!recap) return null;
-  const paragraphs = recap.body
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter(Boolean);
   return (
     <div className="panel" style={{ marginBottom: 20 }}>
       <h2 style={{ fontSize: 16, margin: "0 0 10px" }}>{recap.title || `Week ${recap.week} Recap`}</h2>
-      {paragraphs.map((p, i) => (
-        <p key={i} style={{ fontSize: 14, lineHeight: 1.6, margin: i === paragraphs.length - 1 ? 0 : "0 0 10px" }}>
-          {p}
-        </p>
-      ))}
+      <RecapBody body={recap.body} />
     </div>
   );
 }
