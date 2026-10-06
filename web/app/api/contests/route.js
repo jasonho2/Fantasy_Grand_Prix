@@ -506,6 +506,7 @@ export async function GET(request) {
       .sort((a, b) => b.contest_points - a.contest_points || b.fantasy_points - a.fantasy_points)
       .map(({ manager, ...row }, i) => {
         const rank = i + 1;
+        row = { ...row, manager }; // stable cross-season identity (team names change) -- used by api/crowns
         const previousRank = previousRanks.get(manager) ?? null;
         return {
           rank,
