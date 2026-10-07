@@ -292,6 +292,13 @@ function ContestPanel({ contest, league, season, logos, crowns }) {
     setView("table");
   }
 
+  // Which podium spot (1-3) a row's tint marks, or null for none -- see
+  // the <tr> className in the table below.
+  function podiumRankFor(row) {
+    const place = sortBy === "projected" ? row.displayRank : contest.status === "final" ? row.rank : null;
+    return place != null && place <= 3 ? place : null;
+  }
+
   const sortedLeaderboard = useMemo(() => {
     const rows = [...modeLeaderboard].sort((a, b) => sortValueFor(b, sortBy) - sortValueFor(a, sortBy));
     return rows.map((row, i) => ({ ...row, displayRank: i + 1 }));
@@ -573,11 +580,20 @@ function ContestPanel({ contest, league, season, logos, crowns }) {
                 <tr
                   key={row.team}
                   style={row.displayRank === 1 ? { fontWeight: 700 } : undefined}
-                  // Projected Finish: tint the top three rows (gold/silver/
-                  // bronze, see .podium-N in globals.css) to mark the
-                  // projected podium. Other sorts get no tint.
-                  className={sortBy === "projected" && row.displayRank <= 3 ? `podium-${row.displayRank}` : undefined}
-                  title={sortBy === "projected" && row.displayRank <= 3 ? `Projected ${ordinal(row.displayRank)} place` : undefined}
+                  // Gold/silver/bronze tint (see .podium-N in globals.css):
+                  // the projected podium under Projected Finish, and the
+                  // actual final podium on a cup that's finished -- keyed
+                  // off the leaderboard's own rank, so it stays on the real
+                  // top three even when the table is re-sorted by another
+                  // column. In-progress cups get no tint.
+                  className={podiumRankFor(row) ? `podium-${podiumRankFor(row)}` : undefined}
+                  title={
+                    podiumRankFor(row)
+                      ? sortBy === "projected"
+                        ? `Projected ${ordinal(podiumRankFor(row))} place`
+                        : `${ordinal(podiumRankFor(row))} place finish`
+                      : undefined
+                  }
                 >
                   <td>{ordinal(row.displayRank)}</td>
                   <td className="sticky-col">
