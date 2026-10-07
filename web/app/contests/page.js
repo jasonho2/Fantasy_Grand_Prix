@@ -227,8 +227,12 @@ function ContestPanel({ contest, league, season, logos, crowns }) {
   // only changes display order within whichever mode is selected. Opens on
   // this cup's league-configured default mode rather than always Solo.
   const [mode, setMode] = useState(defaultMode);
-  // Descending only, per spec -- just which column, not direction.
-  const [sortBy, setSortBy] = useState("contest_points");
+  // Descending only, per spec -- just which column, not direction. A cup
+  // that hasn't started yet (shown as a preview once the previous cup is
+  // over -- see startedContests in ContestsInner) has no real results, so
+  // it opens on Projected Finish instead of Total.
+  const defaultSort = contest.status === "upcoming" ? "projected" : "contest_points";
+  const [sortBy, setSortBy] = useState(defaultSort);
   const [view, setView] = useState("table");
   const isDesktop = useIsDesktop();
   // Clicking a team's name in the chart legend narrows the chart to just
@@ -273,7 +277,7 @@ function ContestPanel({ contest, league, season, logos, crowns }) {
   // "Total" sort and table view every cup opens on -- so there'd be
   // nothing for "Reset to Default" to do. Used to disable that button
   // rather than let it be a no-op click.
-  const isAtDefault = mode === defaultMode && sortBy === "contest_points" && view === "table";
+  const isAtDefault = mode === defaultMode && sortBy === defaultSort && view === "table";
 
   // Restores this cup's entire display to how it looked before any of
   // these were touched: the mode (Solo vs Double Dash), the Sort by
@@ -284,7 +288,7 @@ function ContestPanel({ contest, league, season, logos, crowns }) {
   // for this button to reset on that front.
   function resetToDefault() {
     setMode(defaultMode);
-    setSortBy("contest_points");
+    setSortBy(defaultSort);
     setView("table");
   }
 
@@ -608,6 +612,17 @@ function ContestPanel({ contest, league, season, logos, crowns }) {
                   <td style={sortBy === "fantasy_points" ? { fontWeight: 700 } : undefined}>{row.fantasy_points}</td>
                 </tr>
               ))}
+              {sortedLeaderboard.length === 0 && (
+                <tr>
+                  <td colSpan={contest.weeks.length + 4} className="empty-state" style={{ textAlign: "center" }}>
+                    {contest.status === "upcoming"
+                      ? sortBy === "projected"
+                        ? "No projections available for this cup yet."
+                        : "This cup hasn't started yet -- choose Projected Finish to preview it."
+                      : "No results yet."}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -748,10 +763,20 @@ function ContestsInner() {
   // not to surface cups further down the schedule early. As the season
   // progresses, each newly-started cup takes over the top spot the same
   // way as before.
-  const startedContests = useMemo(
-    () => (data?.contests || []).filter((c) => c.status !== "upcoming").reverse(),
-    [data]
-  );
+  //
+  // Exception: once the current cup is over (the latest started cup is
+  // "final" and nothing is in progress), the NEXT cup is shown on top as a
+  // preview -- it opens on Projected Finish (see ContestPanel's
+  // defaultSort) so its projections are visible before it starts. Only the
+  // immediately-next cup, and only if one remains this season.
+  const startedContests = useMemo(() => {
+    const all = data?.contests || [];
+    const started = all.filter((c) => c.status !== "upcoming");
+    const anyInProgress = started.some((c) => c.status === "in_progress");
+    const nextUpcoming = all.find((c) => c.status === "upcoming");
+    const showPreview = started.length > 0 && !anyInProgress && nextUpcoming;
+    return [...started, ...(showPreview ? [nextUpcoming] : [])].reverse();
+  }, [data]);
 
   return (
     <>
