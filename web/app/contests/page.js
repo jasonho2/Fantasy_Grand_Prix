@@ -192,6 +192,64 @@ function leaderboardTitle({ contestName, weeks, mode, sortBy, view }) {
 const CHART_Y_AXIS_WIDTH = 60;
 const CHART_RIGHT_MARGIN = 44;
 
+// "Copy" button on a cup panel: builds a paste-friendly snapshot of exactly
+// what the cup's leaderboard is showing right now (current Mode, Sort by
+// order, and title). Two formats go on the clipboard together: plain text
+// (one line per team -- reads cleanly in a group chat or text message) and
+// an HTML table (pastes as a real table into Sheets, Docs, or email).
+const PODIUM_MEDALS = { 1: "\u{1F947}", 2: "\u{1F948}", 3: "\u{1F949}" };
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
+function buildStandingsCopy({ heading, weeks, liveWeek, rows, podiumRankFor }) {
+  const weekHeaders = weeks.map((wk) => `Wk ${wk}${wk === liveWeek ? " (live)" : ""}`);
+  const fmt = (v) => (v == null ? "-" : v);
+
+  const textLines = rows.map((row) => {
+    const medal = PODIUM_MEDALS[podiumRankFor(row)] ? `${PODIUM_MEDALS[podiumRankFor(row)]} ` : "";
+    const weekly = row.weekly_points.map(fmt).join(" / ");
+    return `${medal}${ordinal(row.displayRank)} ${row.team} -- ${row.contest_points} pts (${weekly}) -- PF ${row.fantasy_points}`;
+  });
+  const text = [heading, `Weekly points: ${weekHeaders.join(" / ")}`, "", ...textLines].join("\n");
+
+  const headerCells = ["Rank", "Team", ...weekHeaders, "Total", "PF"]
+    .map((h) => `<th style="text-align:left;padding:2px 8px">${escapeHtml(h)}</th>`)
+    .join("");
+  const bodyRows = rows
+    .map((row) => {
+      const cells = [ordinal(row.displayRank), row.team, ...row.weekly_points.map(fmt), row.contest_points, row.fantasy_points];
+      return `<tr>${cells.map((c) => `<td style="padding:2px 8px">${escapeHtml(c)}</td>`).join("")}</tr>`;
+    })
+    .join("");
+  const html = `<p><strong>${escapeHtml(heading)}</strong></p><table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+
+  return { text, html };
+}
+
+async function copyToClipboard({ text, html }) {
+  try {
+    if (window.ClipboardItem && navigator.clipboard?.write) {
+      await navigator.clipboard.write([
+        new window.ClipboardItem({
+          "text/plain": new Blob([text], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        }),
+      ]);
+      return true;
+    }
+  } catch {
+    // fall through to plain text
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function RankDelta({ delta }) {
   if (!delta) return null;
   const up = delta > 0;
@@ -303,6 +361,28 @@ function ContestPanel({ contest, league, season, logos, crowns }) {
     const rows = [...modeLeaderboard].sort((a, b) => sortValueFor(b, sortBy) - sortValueFor(a, sortBy));
     return rows.map((row, i) => ({ ...row, displayRank: i + 1 }));
   }, [modeLeaderboard, sortBy]);
+
+  const [copyStatus, setCopyStatus] = useState(null); // null | "copied" | "failed"
+  async function handleCopy() {
+    const heading = `${contest.name} (Weeks ${contest.start_week}-${contest.end_week}) -- ${leaderboardTitle({
+      contestName: contest.name,
+      weeks: contest.weeks,
+      mode,
+      sortBy,
+      view: "table",
+    })}`;
+    const ok = await copyToClipboard(
+      buildStandingsCopy({
+        heading,
+        weeks: contest.weeks,
+        liveWeek: contest.liveWeek,
+        rows: sortedLeaderboard,
+        podiumRankFor,
+      })
+    );
+    setCopyStatus(ok ? "copied" : "failed");
+    setTimeout(() => setCopyStatus(null), 2000);
+  }
 
   // One point per week, each team's *cumulative* placement points through
   // that week -- running total, not that week's placement alone (which is
@@ -513,6 +593,19 @@ function ContestPanel({ contest, league, season, logos, crowns }) {
         >
           Reset to Default
         </button>
+        {/* Past and active cups only -- copies exactly what the table
+            shows right now (Mode, Sort by order), whichever View is open. */}
+        {contest.status !== "upcoming" && (
+          <button
+            type="button"
+            className="week-chip"
+            onClick={handleCopy}
+            disabled={sortedLeaderboard.length === 0}
+            title="Copy these standings to paste into a chat, email, or spreadsheet"
+          >
+            {copyStatus === "copied" ? "Copied!" : copyStatus === "failed" ? "Copy failed" : "Copy"}
+          </button>
+        )}
       </div>
 
       {/* In Chart view, pad the title by the same widths the chart
